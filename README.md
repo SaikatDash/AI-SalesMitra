@@ -1,4 +1,4 @@
-# 🤖 AI-SalesMitra: AI-Powered Sales Prediction & Analysis Dashboard
+# AI-SalesMitra: AI-Powered Sales Prediction & Analysis Dashboard
 
 <div align="center">
   <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=26&pause=1200&color=00D9FF&center=true&vCenter=true&width=900&lines=Welcome+to+AI-SalesMitra;Intelligent+Sales+Forecasting;ML-Powered+Inventory+Management;Transform+Business+with+AI-Driven+Insights" alt="Typing SVG" />
