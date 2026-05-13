@@ -7,6 +7,7 @@ from io import BytesIO
 import warnings
 from pathlib import Path
 import sys
+import streamlit.components.v1 as components
 
 # ============================================
 # CONFIGURATION
@@ -102,6 +103,23 @@ def login_user(email: str, password: str) -> dict:
         return {"success": False, "message": "Cannot connect to backend server"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+def ask_chatbot(query: str) -> dict:
+    """Ask backend RAG chatbot for navigation or sales guidance."""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/api/chatbot/query",
+            json={"query": query},
+            timeout=30,
+        )
+        if response.status_code == 200:
+            return response.json()
+        return {"answer": response.json().get("detail", "Chatbot request failed")}
+    except requests.exceptions.ConnectionError:
+        return {"answer": "Cannot connect to backend server"}
+    except Exception as e:
+        return {"answer": str(e)}
 
 
 def logout_user():
@@ -522,7 +540,10 @@ st.markdown(get_custom_css(), unsafe_allow_html=True)
 
 # Show navbar if logged in
 if st.session_state.user_logged_in:
-    col1, col2, col3, col4 = st.columns([2, 2, 1.2, 0.8])
+    if "chat_expanded" not in st.session_state:
+        st.session_state.chat_expanded = False
+
+    col1, col2, col3, col4, col5 = st.columns([2, 2, 1.2, 0.8, 0.4])
     with col1:
         st.markdown("### 💊 SalesMitraAI:You Personal Sales Report Analyzer Assistant")
     with col2:
@@ -536,7 +557,225 @@ if st.session_state.user_logged_in:
         if st.button(theme_emoji, key="theme_toggle", use_container_width=True):
             st.session_state.dark_mode = not st.session_state.dark_mode
             st.rerun()
+    with col5:
+        if st.button("💬", key="open_chat_btn", help="Open SalesMitra RAG Chatbot", use_container_width=True):
+            st.session_state.chat_expanded = True
     st.divider()
+
+    if st.session_state.chat_expanded:
+        components.html(f"""
+        <script>
+        (function() {{
+            const doc = window.parent.document;
+            const apiBase = {json.dumps(API_BASE_URL)};
+            const old = doc.getElementById("salesmitra-rag-overlay");
+            if (old) old.remove();
+            if (!window.parent.salesmitraRagMessages) {{
+                window.parent.salesmitraRagMessages = [
+                    {{ role: "assistant", text: "Ask me about sales, profit projection, top products, or how to navigate the app." }}
+                ];
+            }}
+            if (!doc.getElementById("salesmitra-rag-style")) {{
+                const style = doc.createElement("style");
+                style.id = "salesmitra-rag-style";
+                style.textContent = `
+                    #salesmitra-rag-overlay {{
+                        position: fixed;
+                        right: 28px;
+                        bottom: 26px;
+                        width: min(420px, calc(100vw - 36px));
+                        max-height: min(650px, calc(100vh - 150px));
+                        z-index: 2147483000;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 10px;
+                        padding: 16px;
+                        background: #ffffff;
+                        border: 1px solid rgba(148, 163, 184, 0.28);
+                        border-radius: 8px;
+                        box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+                        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                    }}
+                    #salesmitra-rag-overlay * {{ box-sizing: border-box; }}
+                    .sm-chat-header {{
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        gap: 10px;
+                        padding: 12px 14px;
+                        border-radius: 8px;
+                        color: #ffffff;
+                        background: linear-gradient(135deg, #0f172a 0%, #1e40af 100%);
+                    }}
+                    .sm-chat-title {{ font-weight: 700; font-size: 15px; line-height: 1.2; }}
+                    .sm-chat-subtitle {{ color: rgba(255,255,255,0.78); font-size: 12px; margin-top: 2px; }}
+                    .sm-chat-close {{
+                        border: 0;
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 999px;
+                        color: #ffffff;
+                        background: rgba(255,255,255,0.16);
+                        cursor: pointer;
+                        font-size: 18px;
+                        line-height: 1;
+                    }}
+                    .sm-chat-messages {{
+                        min-height: 180px;
+                        max-height: 330px;
+                        overflow: auto;
+                        padding: 12px;
+                        border-radius: 8px;
+                        border: 1px solid rgba(148, 163, 184, 0.2);
+                        background: #f8fafc;
+                    }}
+                    .sm-chat-row {{ display: flex; margin: 8px 0; }}
+                    .sm-chat-row.user {{ justify-content: flex-end; }}
+                    .sm-chat-bubble {{
+                        max-width: 86%;
+                        padding: 10px 12px;
+                        border-radius: 8px;
+                        color: #0f172a;
+                        background: #ffffff;
+                        border: 1px solid rgba(148, 163, 184, 0.22);
+                        font-size: 14px;
+                        line-height: 1.45;
+                        white-space: pre-wrap;
+                    }}
+                    .sm-chat-row.user .sm-chat-bubble {{
+                        color: #ffffff;
+                        background: #2563eb;
+                        border-color: #2563eb;
+                    }}
+                    .sm-chat-form {{ display: flex; gap: 8px; }}
+                    .sm-chat-input {{
+                        flex: 1;
+                        min-width: 0;
+                        height: 42px;
+                        padding: 0 12px;
+                        color: #0f172a;
+                        background: #ffffff;
+                        border: 1px solid rgba(148, 163, 184, 0.55);
+                        border-radius: 8px;
+                        outline: none;
+                    }}
+                    .sm-chat-send, .sm-chat-clear {{
+                        height: 42px;
+                        border: 0;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-weight: 700;
+                    }}
+                    .sm-chat-send {{
+                        min-width: 72px;
+                        color: #ffffff;
+                        background: #2563eb;
+                    }}
+                    .sm-chat-clear {{
+                        color: #334155;
+                        background: #e2e8f0;
+                    }}
+                    @media (max-width: 768px) {{
+                        #salesmitra-rag-overlay {{
+                            right: 12px;
+                            bottom: 12px;
+                            width: calc(100vw - 24px);
+                            max-height: calc(100vh - 96px);
+                        }}
+                        .sm-chat-messages {{ max-height: 300px; }}
+                    }}
+                `;
+                doc.head.appendChild(style);
+            }}
+
+            const overlay = doc.createElement("div");
+            overlay.id = "salesmitra-rag-overlay";
+            overlay.innerHTML = `
+                <div class="sm-chat-header">
+                    <div>
+                        <div class="sm-chat-title">SalesMitra RAG Chatbot</div>
+                        <div class="sm-chat-subtitle">Sales insights, forecasts, and app navigation</div>
+                    </div>
+                    <button class="sm-chat-close" type="button" aria-label="Close chatbot">&times;</button>
+                </div>
+                <div class="sm-chat-messages"></div>
+                <form class="sm-chat-form">
+                    <input class="sm-chat-input" placeholder="Type your sales question..." autocomplete="off" />
+                    <button class="sm-chat-send" type="submit">Send</button>
+                    <button class="sm-chat-clear" type="button">Clear</button>
+                </form>
+            `;
+            doc.body.appendChild(overlay);
+
+            const messagesEl = overlay.querySelector(".sm-chat-messages");
+            const inputEl = overlay.querySelector(".sm-chat-input");
+            const formEl = overlay.querySelector(".sm-chat-form");
+            const closeEl = overlay.querySelector(".sm-chat-close");
+            const clearEl = overlay.querySelector(".sm-chat-clear");
+
+            function escapeHtml(value) {{
+                return String(value)
+                    .replaceAll("&", "&amp;")
+                    .replaceAll("<", "&lt;")
+                    .replaceAll(">", "&gt;")
+                    .replaceAll('"', "&quot;")
+                    .replaceAll("'", "&#039;");
+            }}
+
+            function renderMessages() {{
+                messagesEl.innerHTML = window.parent.salesmitraRagMessages.map((message) => `
+                    <div class="sm-chat-row ${{message.role}}">
+                        <div class="sm-chat-bubble">${{escapeHtml(message.text)}}</div>
+                    </div>
+                `).join("");
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            }}
+
+            async function askRagBot(prompt) {{
+                window.parent.salesmitraRagMessages.push({{ role: "user", text: prompt }});
+                const loading = {{ role: "assistant", text: "Thinking..." }};
+                window.parent.salesmitraRagMessages.push(loading);
+                renderMessages();
+                try {{
+                    const response = await fetch(`${{apiBase}}/api/chatbot/query`, {{
+                        method: "POST",
+                        headers: {{ "Content-Type": "application/json" }},
+                        body: JSON.stringify({{ query: prompt }})
+                    }});
+                    const result = await response.json();
+                    let answer = result.answer || result.detail || "I could not answer that.";
+                    if (Array.isArray(result.navigation) && result.navigation.length) {{
+                        answer += "\\n\\nNext steps:\\n" + result.navigation.slice(0, 3)
+                            .map((item) => `- ${{item.label || "Step"}}: ${{item.detail || ""}}`)
+                            .join("\\n");
+                    }}
+                    loading.text = answer;
+                }} catch (error) {{
+                    loading.text = "Cannot connect to backend server.";
+                }}
+                renderMessages();
+            }}
+
+            formEl.addEventListener("submit", (event) => {{
+                event.preventDefault();
+                const prompt = inputEl.value.trim();
+                if (!prompt) return;
+                inputEl.value = "";
+                askRagBot(prompt);
+            }});
+            closeEl.addEventListener("click", () => overlay.remove());
+            clearEl.addEventListener("click", () => {{
+                window.parent.salesmitraRagMessages = [
+                    {{ role: "assistant", text: "Ask me about sales, profit projection, top products, or how to navigate the app." }}
+                ];
+                renderMessages();
+            }});
+
+            renderMessages();
+            setTimeout(() => inputEl.focus(), 100);
+        }})();
+        </script>
+        """, height=0)
 
 # ============================================
 # NOT LOGGED IN - SHOW AUTH FORMS
@@ -740,8 +979,8 @@ if not st.session_state.user_logged_in:
                 <div class="demo-box">
                     <h3>🎯 Try Demo Credentials</h3>
                     <div class="demo-credentials">
-                        <p><strong>Email:</strong> admin@example.com</p>
-                        <p><strong>Password:</strong> admin123</p>
+                        <p><strong>Email:</strong> sd449420@gmail.com</p>
+                        <p><strong>Password:</strong> s449420</p>
                     </div>
                     <p style="margin-top: 15px; font-size: 14px;">Click "Login" and use these credentials to explore the full dashboard.</p>
                 </div>
@@ -766,10 +1005,34 @@ else:
             # Read the sales4 file with UTF-8 encoding
             with open(sales4_path, 'r', encoding='utf-8') as f:
                 sales4_code = f.read()
-            
-            # Remove st.set_page_config to avoid conflicts
-            sales4_code = sales4_code.replace('st.set_page_config(', '# st.set_page_config(')
-            
+
+            # Remove any existing st.set_page_config(...) block to avoid conflicts
+            # (do a safe multi-line removal instead of a naive string replace)
+            try:
+                lines = sales4_code.splitlines()
+                out_lines = []
+                skip = False
+                paren_level = 0
+                for line in lines:
+                    if not skip and 'st.set_page_config(' in line:
+                        # begin skipping this block
+                        skip = True
+                        paren_level = line.count('(') - line.count(')')
+                        # if the opening line also has closing paren, stop skipping
+                        if paren_level <= 0:
+                            skip = False
+                        continue
+                    if skip:
+                        paren_level += line.count('(') - line.count(')')
+                        if paren_level <= 0:
+                            skip = False
+                        continue
+                    out_lines.append(line)
+                sales4_code = '\n'.join(out_lines)
+            except Exception:
+                # fallback to conservative single-line replacement
+                sales4_code = sales4_code.replace('st.set_page_config(', '# st.set_page_config(')
+
             # Create execution context with necessary imports
             exec_globals = {
                 '__name__': '__main__',
@@ -782,7 +1045,7 @@ else:
                 'json': json,
                 'requests': requests,
             }
-            
+
             # Execute the code
             exec(sales4_code, exec_globals)
             

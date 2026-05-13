@@ -1,8 +1,3 @@
-"""
-Database Connection & Registration Test Script
-Tests if the backend can properly store user data in PostgreSQL
-"""
-
 import requests
 import json
 from datetime import datetime
@@ -77,7 +72,7 @@ try:
     db.commit()
     db.refresh(test_user)
     
-    print(f"✅ Direct insert SUCCESSFUL")
+    print(f" Direct insert SUCCESSFUL")
     print(f"   User ID: {test_user.id}")
     print(f"   Email: {test_user.email}")
     

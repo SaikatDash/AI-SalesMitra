@@ -15,24 +15,110 @@ import statsmodels.tsa.api as smt
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import plotly.graph_objects as go
 from pandas.tseries.offsets import DateOffset
+import requests
 
 warnings.filterwarnings('ignore')
 
 # Disable st_aggrid - use regular dataframe instead
 AGGRID_AVAILABLE = False
 
+# ---------- PAGE CONFIG (MUST BE FIRST!) ----------
+st.set_page_config(
+    page_title="SalesMitra AI",
+    page_icon="💊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # ---------- GLOBAL PLOT SETTINGS ----------
 COLOR_SEQ = px.colors.qualitative.Bold  # colorful discrete palette [web:16][web:17]
 TEMPLATE = "plotly_dark"               # dark stylish template [web:25]
 
-# ---------- DATA LOAD ----------
+# ---------- API CONFIGURATION ----------
+API_BASE_URL = "http://127.0.0.1:8000"
 
-df = pd.read_csv(r"c:\CODE\python projects\sir\Medicine-Sales-Analysis-Dashboard-with-Future-Business-Predictions\csv\Mfg_Sales.csv")
+
+# ---------- DATA LOAD FROM API ----------
+@st.cache_data
+def fetch_sales_data_from_api():
+    """Fetch sales data from FastAPI backend"""
+    try:
+        # First get total record count so we can request all rows
+        summary = requests.get(f"{API_BASE_URL}/api/sales/summary", timeout=5)
+        total = None
+        if summary.status_code == 200:
+            try:
+                total = int(summary.json().get('total_records', 0))
+            except Exception:
+                total = None
+
+        limit = total if total and total > 0 else 1000000
+        response = requests.get(f"{API_BASE_URL}/api/sales", params={"limit": limit}, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                return pd.DataFrame(data)
+            else:
+                return pd.DataFrame()
+        else:
+            return None
+    except Exception as e:
+        return None
+
+
+@st.cache_data(ttl=300)
+def fetch_product_location_clusters(profit_margin_pct=20):
+    """Fetch product-location clustering and projected profit from backend."""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/api/analytics/product-location-clusters",
+            params={"profit_margin_pct": profit_margin_pct, "limit": 100},
+            timeout=30,
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception:
+        return None
+
+with st.spinner("⏳ Loading sales data from database..."):
+    df = fetch_sales_data_from_api()
+
+# Show error only if API failed completely
+if df is None:
+    st.error("❌ Cannot connect to backend API at http://127.0.0.1:8000")
+    st.info("✅ Please ensure the FastAPI backend is running:\n\nIn terminal, run:\n```\ncd backend\npython main.py\n```")
+    st.stop()
+
+if df.empty:
+    st.warning("⚠️ No data in database. Please load CSV first.")
+    st.info("✅ To load medicine sales data, run:\n\n```\ncd csv\npython main.py\n```")
+    st.stop()
+
+# Rename columns to match original format
+df = df.rename(columns={
+    'ac_yr': 'AcYr',
+    'mmyyyy': 'MMYYYY',
+    'zone': 'Zone',
+    'branch_name': 'BranchName',
+    'mkt_type': 'MKTType',
+    'brand_name': 'BrandName',
+    'sales_qty': 'SalesQty',
+    'sales_amt': 'SalesAmt',
+    'cn_qty': 'CNQty',
+    'cn_amt': 'CNAmt',
+    'act_qty': 'ActQty',
+    'act_amt': 'ActAmt'
+})
 
 df["MMYYYY"] = pd.to_datetime(df["MMYYYY"], format="%Y-%m", errors="coerce")
 df = df.dropna(subset=["MMYYYY"])
 df["Year"] = df["MMYYYY"].dt.year
 df["Month"] = df["MMYYYY"].dt.strftime("%B")
+
+# Fill missing values
+df['ActQty'] = df['ActQty'].fillna(0)
+df['ActAmt'] = df['ActAmt'].fillna(0)
 
 # ---------- FINANCIAL YEAR MONTH ORDER ----------
 fy_month_order = [
@@ -93,7 +179,7 @@ def test_stationarity(timeseries):
         'p-value': dftest[1],
         '#Lags Used': dftest[2],
         'Observations': dftest[3],
-        'Critical Values': dftest[4]
+        'Critical Values': dftest[4] if len(dftest) > 4 else {}
     }
 
 def run_arima_forecast(data: pd.DataFrame, arima_order=(2, 1, 2), test_size=30, forecast_periods=48):
@@ -106,73 +192,138 @@ def run_arima_forecast(data: pd.DataFrame, arima_order=(2, 1, 2), test_size=30, 
     - test_size: number of observations for backtesting 
     - forecast_periods: number of future periods to forecast
     """
+    # Validate and prepare time series
     try:
-        # Prepare time series data
         ts_data = data.groupby('MMYYYY')['ActAmt'].sum().reset_index()
-        ts_data = ts_data.sort_values('MMYYYY').set_index('MMYYYY')
-        
+    except Exception:
+        st.error("ARIMA: input DataFrame must contain 'MMYYYY' and 'ActAmt' columns")
+        return None
+
+    # convert index to datetime and sort
+    ts_data['MMYYYY'] = pd.to_datetime(ts_data['MMYYYY'], errors='coerce')
+    ts_data = ts_data.dropna(subset=['MMYYYY'])
+    ts_data = ts_data.sort_values('MMYYYY').set_index('MMYYYY')
+    ts_series = ts_data['ActAmt'].astype(float).fillna(0)
+
+    # Basic checks
+    if len(ts_series) < max(24, (arima_order[0] + arima_order[2] + 3)):
+        st.warning("ARIMA: Not enough historical periods for reliable ARIMA model. Returning simple baseline forecast.")
+        # Baseline: use last observed value for forecast and simple backtest
+        last_value = float(ts_series.iloc[-1]) if len(ts_series) > 0 else 0.0
+        historical_df = ts_series.reset_index()
+        historical_df.columns = ['Date', 'Actual_Sales']
+        # backtest: use last `test_size` values if available
+        backtest_index = ts_series.index[-min(test_size, len(ts_series)):] if len(ts_series)>0 else []
+        backtest_actual = ts_series[-len(backtest_index):] if len(backtest_index)>0 else pd.Series([], dtype=float)
+        backtest_pred = [last_value] * len(backtest_actual)
+        backtest_df = pd.DataFrame({'Date': backtest_index, 'Actual_Sales': backtest_actual.values, 'Predicted_Sales': backtest_pred})
+        # forecast dates: weekly offsets
+        future_dates = [ts_series.index[-1] + DateOffset(weeks=x) for x in range(1, forecast_periods+1)] if len(ts_series)>0 else [pd.Timestamp.now() + DateOffset(weeks=x) for x in range(1, forecast_periods+1)]
+        forecast_df = pd.DataFrame({'Date': future_dates, 'Forecasted_Sales': [last_value]*forecast_periods})
+        mse = mean_squared_error(backtest_actual.values, backtest_pred) if len(backtest_pred)>0 else 0.0
+        rmse = math.sqrt(mse)
+        mae = mean_absolute_error(backtest_actual.values, backtest_pred) if len(backtest_pred)>0 else 0.0
+        return {
+            'historical': historical_df,
+            'backtest': backtest_df,
+            'forecast': forecast_df,
+            'model': None,
+            'metrics': {'rmse': rmse, 'mae': mae},
+            'stationarity': test_stationarity(ts_series) if len(ts_series)>0 else {},
+            'is_stationary': False,
+        }
+
+    # check for zero variance
+    if ts_series.std() == 0:
+        st.warning("ARIMA: Time series has zero variance. Using constant-value forecast.")
+        last_value = float(ts_series.iloc[-1])
+        historical_df = ts_series.reset_index()
+        historical_df.columns = ['Date', 'Actual_Sales']
+        backtest_index = ts_series.index[-min(test_size, len(ts_series)):] if len(ts_series)>0 else []
+        backtest_actual = ts_series[-len(backtest_index):] if len(backtest_index)>0 else pd.Series([], dtype=float)
+        backtest_pred = [last_value] * len(backtest_actual)
+        backtest_df = pd.DataFrame({'Date': backtest_index, 'Actual_Sales': backtest_actual.values, 'Predicted_Sales': backtest_pred})
+        future_dates = [ts_series.index[-1] + DateOffset(weeks=x) for x in range(1, forecast_periods+1)]
+        forecast_df = pd.DataFrame({'Date': future_dates, 'Forecasted_Sales': [last_value]*forecast_periods})
+        mse = mean_squared_error(backtest_actual.values, backtest_pred) if len(backtest_pred)>0 else 0.0
+        rmse = math.sqrt(mse)
+        mae = mean_absolute_error(backtest_actual.values, backtest_pred) if len(backtest_pred)>0 else 0.0
+        return {
+            'historical': historical_df,
+            'backtest': backtest_df,
+            'forecast': forecast_df,
+            'model': None,
+            'metrics': {'rmse': rmse, 'mae': mae},
+            'stationarity': test_stationarity(ts_series),
+            'is_stationary': True,
+        }
+
+    # At this point we attempt ARIMA fitting with robust handling
+    try:
         # ===== STATIONARITY TEST =====
-        stationarity_results = test_stationarity(ts_data['ActAmt'])
-        is_stationary = stationarity_results['p-value'] < 0.05
-        
+        stationarity_results = test_stationarity(ts_series)
+        is_stationary = stationarity_results.get('p-value', 1.0) < 0.05
+
         # ===== IN-SAMPLE FORECASTING (Backtesting) =====
-        train_size = len(ts_data) - test_size
-        train, test = ts_data['ActAmt'][0:train_size], ts_data['ActAmt'][train_size:len(ts_data)]
-        
-        history = [x for x in train]
+        train_size = max(1, len(ts_series) - test_size)
+        train, test = ts_series.iloc[:train_size], ts_series.iloc[train_size:]
+
+        history = list(train.values)
         in_sample_predictions = []
-        
+
         for t in range(len(test)):
-            model = ARIMA(history, order=arima_order)
-            model_fit = model.fit()
-            output = model_fit.forecast(steps=1)
-            yhat = float(output[0])
+            try:
+                model = ARIMA(history, order=arima_order)
+                model_fit = model.fit()
+                output = model_fit.forecast(steps=1)
+                yhat = float(output[0])
+            except Exception:
+                # fallback to last-known-value prediction
+                yhat = float(history[-1])
             in_sample_predictions.append(yhat)
             history.append(test.iloc[t])
-        
+
         # Calculate error metrics
         mse = mean_squared_error(test[:len(in_sample_predictions)], in_sample_predictions)
         rmse = math.sqrt(mse)
         mae = mean_absolute_error(test[:len(in_sample_predictions)], in_sample_predictions)
-        
+
         # ===== OUT-OF-SAMPLE FORECASTING (Future Prediction) =====
         # Train final model on all historical data
-        model = ARIMA(ts_data['ActAmt'], order=arima_order)
-        model_fit = model.fit()
-        
-        # Generate future dates (using weeks like in notebook)
-        future_dates = [ts_data.index[-1] + DateOffset(weeks=x) for x in range(1, forecast_periods+1)]
-        out_sample_predictions = []
-        
-        history_forecast = [x for x in ts_data['ActAmt']]
-        for t in range(forecast_periods):
-            model_temp = ARIMA(history_forecast, order=arima_order)
-            model_fit_temp = model_temp.fit()
-            output = model_fit_temp.forecast(steps=1)
-            forecast_value = float(output[0])
-            out_sample_predictions.append(forecast_value)
-            history_forecast.append(forecast_value)
-        
+        try:
+            model = ARIMA(ts_series, order=arima_order)
+            model_fit = model.fit()
+            # use model to produce multi-step forecast
+            forecast_values = model_fit.forecast(steps=forecast_periods)
+            out_sample_predictions = [float(x) for x in forecast_values]
+            last_index = ts_series.index[-1]
+            future_dates = [last_index + DateOffset(weeks=x) for x in range(1, forecast_periods+1)]
+        except Exception as e:
+            # fallback: rolling last value
+            out_sample_predictions = [float(ts_series.iloc[-1])] * forecast_periods
+            last_index = ts_series.index[-1]
+            future_dates = [last_index + DateOffset(weeks=x) for x in range(1, forecast_periods+1)]
+
         # Create output dataframes
-        historical_df = ts_data.reset_index()
+        historical_df = ts_series.reset_index()
         historical_df.columns = ['Date', 'Actual_Sales']
-        
+
         backtest_df = pd.DataFrame({
             'Date': test.index,
             'Actual_Sales': test.values,
             'Predicted_Sales': in_sample_predictions
         })
-        
+
         forecast_df = pd.DataFrame({
             'Date': future_dates,
             'Forecasted_Sales': out_sample_predictions
         })
-        
+
         return {
             'historical': historical_df,
             'backtest': backtest_df,
             'forecast': forecast_df,
-            'model': model_fit,
+            'model': model_fit if 'model_fit' in locals() else None,
             'metrics': {
                 'rmse': rmse,
                 'mae': mae
@@ -182,7 +333,16 @@ def run_arima_forecast(data: pd.DataFrame, arima_order=(2, 1, 2), test_size=30, 
         }
     except Exception as e:
         st.error(f"Error in ARIMA forecasting: {str(e)}")
-        return None
+        # Return a safe fallback results dict so UI can handle gracefully
+        return {
+            'historical': pd.DataFrame(columns=['Date', 'Actual_Sales']),
+            'backtest': pd.DataFrame(columns=['Date', 'Actual_Sales', 'Predicted_Sales']),
+            'forecast': pd.DataFrame(columns=['Date', 'Forecasted_Sales']),
+            'model': None,
+            'metrics': {'rmse': 0.0, 'mae': 0.0},
+            'stationarity': {'Test Statistic': 0.0, 'p-value': 1.0, 'Critical Values': {}},
+            'is_stationary': False,
+        }
 
 def plot_arima_diagnostics(ts_data):
     """Plot ACF and PACF for time series data (from notebook)."""
@@ -363,28 +523,8 @@ def display_grid_with_export(data: pd.DataFrame, title: str, key_prefix: str):
     if len(num_cols) > 0:
         rounded_data[num_cols] = rounded_data[num_cols].round(0)
 
-    # Display as AgGrid if available, else as regular dataframe
-    if AGGRID_AVAILABLE:
-        try:
-            gob = GridOptionsBuilder.from_dataframe(rounded_data)
-            gob.configure_default_column(
-                resizable=True, sortable=True, filter=True, editable=False
-            )
-            gob.configure_pagination(paginationAutoPageSize=True)
-            grid_options = gob.build()
-
-            AgGrid(
-                rounded_data,
-                gridOptions=grid_options,
-                theme="alpine",
-                fit_columns_on_grid_load=True,
-                height=400,
-                key=f"{key_prefix}_grid",
-            )
-        except Exception:
-            st.dataframe(rounded_data, use_container_width=True)
-    else:
-        st.dataframe(rounded_data, use_container_width=True)
+    # Display as regular dataframe
+    st.dataframe(rounded_data, use_container_width=True)
 
     # Download buttons
     col1, col2 = st.columns(2)
@@ -417,97 +557,100 @@ def display_grid_with_export(data: pd.DataFrame, title: str, key_prefix: str):
         except Exception:
             ""
 
-# ---------- TITLE ----------
-st.markdown(
-    "<h1 style='color:violet; font-weight:1000;'>Analytical Dashboard</h1>",
-    unsafe_allow_html=True,
-)
-
 # ---------- SESSION ----------
 if "page" not in st.session_state:
     st.session_state.page = "dashboard"
 if "fy_start" not in st.session_state:
     st.session_state.fy_start = base_years[-1]
-if "sidebar_opened" not in st.session_state:
-    st.session_state.sidebar_opened = False
 
-# ---------- START YOUR JOURNEY BUTTON ----------
-if not st.session_state.sidebar_opened:
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-    with col_btn2:
-        if st.button(
-            "🚀 START YOUR JOURNEY", 
-            use_container_width=True,
-            key="start_journey_btn",
-            help="Click to open the navigation sidebar and explore all analysis options"
-        ):
-            st.session_state.sidebar_opened = True
-            st.rerun()
-    
-    # Add some spacing
-    st.markdown("<br>", unsafe_allow_html=True)
+# ---------- ALWAYS SHOW SIDEBAR ----------
+st.sidebar.markdown(
+    "<h3 style='color:#ffd95a; margin-bottom:0.3rem;'>📊 Way of Analysis</h3>",
+    unsafe_allow_html=True,
+)
 
-# ---------- CSS ----------
+menu = {
+    "Quarter vs Year": "comparison",
+    "Business Metrics": "business",
+    "Branch Analysis": "branchbusiness",
+    "Product Insights": "prodmonth",
+    "Credit Notes": "credit",
+    "Branch Compare": "branchcomparison",
+    "Category Compare": "productcategorycomparison",
+    "Product Clusters": "clusters",
+    "ARIMA Forecast": "arima",
+}
 
-# ---------- SIDEBAR ----------
-if st.session_state.sidebar_opened:
-    st.sidebar.markdown(
-        "<h3 style='color:#ffd95a; margin-bottom:0.3rem;'>Way of Analysis</h3>",
+for title, key in menu.items():
+    if st.sidebar.button(title, use_container_width=True, key=f"nav_{key}"):
+        st.session_state.page = key
+        st.rerun()
+
+st.sidebar.markdown("---")
+
+# ---------- SMART WELCOME & RECOMMENDATIONS ----------
+if st.session_state.page == "dashboard":
+    st.markdown(
+        "<h2 style='color:violet; font-weight:bold;'>✨ Welcome to SalesMitra Intelligence</h2>",
         unsafe_allow_html=True,
     )
-
-    menu = {
-        "Quarter vs Year Comparison": "comparison",
-        "Business Analysis": "business",
-        "Branch–Business Analysis": "branchbusiness",
-        "Product–Month Analysis": "prodmonth",
-        "Credit Note Analysis": "credit",
-        "Branch Business-Comparison": "branchcomparison",
-        "Product Category-Comparison": "productcategorycomparison",
-        "ARIMA Sales Forecasting": "arima",
-    }
-
-    for title, key in menu.items():
-        with st.sidebar.container():
-            st.markdown("<div class='nav-card'>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='nav-card-header'>{title}</div>",
-                unsafe_allow_html=True,
-            )
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown(
-                    "<div class='nav-card-body'>Click to explore detailed insights.</div>",
-                    unsafe_allow_html=True,
-                )
-            with col2:
-                if st.button("Go", key=f"btn_{key}"):
-                    st.session_state.page = key
-            st.markdown("</div>", unsafe_allow_html=True)
     
-    st.sidebar.markdown("---")
-    if st.sidebar.button("❌ Close Navigation", use_container_width=True):
-        st.session_state.sidebar_opened = False
-        st.rerun()
-else:
     st.markdown("""
-    <div style='text-align: center; padding: 40px 20px;'>
-        <h3 style='color: #ffd95a; font-size: 24px;'>Welcome to Your Sales Analytics Dashboard! 📊</h3>
-        <p style='color: #cbd5e1; font-size: 16px; margin-top: 20px;'>
-            Click the <strong>"🚀 START YOUR JOURNEY"</strong> button above to explore powerful analysis tools:
-        </p>
-        <ul style='text-align: left; display: inline-block; color: #cbd5e1; margin-top: 20px;'>
-            <li>📈 Quarter vs Year Comparison</li>
-            <li>📊 Business Analysis</li>
-            <li>🏢 Branch Performance Metrics</li>
-            <li>💊 Product Insights</li>
-            <li>📝 Credit Note Tracking</li>
-            <li>🔮 ARIMA Sales Forecasting</li>
-            <li>📉 Advanced Comparisons</li>
+    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; color: white;'>
+        <h3>🤖 AI-Powered Recommendations</h3>
+        <p><strong>Top 3 Insights to Explore:</strong></p>
+        <ul>
+            <li>🚀 <strong>ARIMA Forecasting</strong> - Predict next 48 weeks of sales with machine learning</li>
+            <li>📊 <strong>Business Metrics</strong> - Track revenue, growth rates, and profitability trends</li>
+            <li>🔄 <strong>Branch Comparisons</strong> - Compare performance across locations and categories</li>
         </ul>
-        <p style='color: #cbd5e1; margin-top: 30px;'><em>Let's unlock insights from your data! 🚀</em></p>
+        <p style='margin-top: 15px; font-size: 14px;'><em>👉 Click any option in the sidebar to begin analysis</em></p>
     </div>
     """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Quick Stats
+    st.markdown("### 📊 Quick Dashboard Summary")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("💰 Total Sales", f"₹{df['SalesAmt'].sum()/10000000:.1f}Cr")
+    with col2:
+        st.metric("📦 Units Sold", f"{df['SalesQty'].sum()/1000:.0f}K")
+    with col3:
+        st.metric("🎯 Avg Order", f"₹{df['SalesAmt'].mean():,.0f}")
+    with col4:
+        st.metric("📈 Records", f"{len(df):,}")
+    
+    st.markdown("---")
+    
+    # Key visualizations
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 🌍 Sales by Zone")
+        zone_sales = df.groupby('Zone')['SalesAmt'].sum().reset_index().sort_values('SalesAmt', ascending=False).head(8)
+        fig1 = px.bar(zone_sales, x='Zone', y='SalesAmt', color_discrete_sequence=COLOR_SEQ, template=TEMPLATE)
+        fig1.update_layout(height=350, showlegend=False)
+        st.plotly_chart(fig1, use_container_width=True)
+    
+    with col2:
+        st.markdown("### 💊 Top Products")
+        brand_sales = df.groupby('BrandName')['SalesAmt'].sum().reset_index().sort_values('SalesAmt', ascending=False).head(8)
+        fig2 = px.bar(brand_sales, x='BrandName', y='SalesAmt', color_discrete_sequence=COLOR_SEQ, template=TEMPLATE)
+        fig2.update_layout(height=350, showlegend=False)
+        st.plotly_chart(fig2, use_container_width=True)
+    
+    st.markdown("---")
+    st.markdown("### 💡 What's New")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.info("🚀 **ARIMA** - Forecast sales for next 48 weeks using ML")
+    with col2:
+        st.warning("📊 **Analysis** - Deep dive into business performance metrics")
+    with col3:
+        st.success("🔄 **Comparison** - Compare zones, branches & products side-by-side")
 
 # =====================================================================
 # PAGE 1: QUARTER COMPARISON
@@ -829,6 +972,7 @@ elif st.session_state.page == "prodmonth":
         if agg_df_monthly.empty:
             st.warning("No non-zero sales for the selected filters.")
         else:
+            fig = None
             if chart_type == "Bar":
                 fig = px.bar(
                     agg_df_monthly,
@@ -875,8 +1019,9 @@ elif st.session_state.page == "prodmonth":
                     template=TEMPLATE,
                 )
 
-            fig.update_traces(text=None)
-            st.plotly_chart(fig, use_container_width=True)
+            if fig is not None:
+                fig.update_traces(text=None)
+                st.plotly_chart(fig, use_container_width=True)
 
             # top_row = agg_df.sort_values("ActAmt", ascending=False).iloc[0]
             # st.markdown(
@@ -930,6 +1075,7 @@ elif st.session_state.page == "prodmonth":
         if agg_df_yearly.empty:
             st.warning("No non-zero sales for the selected filters.")
         else:
+            fig = None
             if chart_type == "Bar":
                 fig = px.bar(
                     agg_df_yearly,
@@ -976,8 +1122,9 @@ elif st.session_state.page == "prodmonth":
                     template=TEMPLATE,
                 )
 
-            fig.update_traces(text=None)
-            st.plotly_chart(fig, use_container_width=True)
+            if fig is not None:
+                fig.update_traces(text=None)
+                st.plotly_chart(fig, use_container_width=True)
 
             
 
@@ -1063,6 +1210,7 @@ elif st.session_state.page == "branchbusiness":
         )
 
     if not branch_month.empty and branch_month[value_col].sum() > 0:
+        fig = None
         if chart_type == "Bar":
             fig = px.bar(
                 branch_month,
@@ -1109,8 +1257,10 @@ elif st.session_state.page == "branchbusiness":
                 template=TEMPLATE,
             )
 
-        fig.update_traces(text=None)
-        st.plotly_chart(fig, use_container_width=True)
+        if fig is not None and chart_type != "Bar":
+            fig.update_traces(text=None)
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
 
         
 
@@ -1137,6 +1287,7 @@ elif st.session_state.page == "branchbusiness":
     branch_month["Month"] = branch_month["Month"].cat.remove_unused_categories()
 
     if not branch_month.empty and branch_month[value_col].sum() > 0:
+        fig = None
         if chart_type == "Bar":
             fig = px.bar(
                 branch_month,
@@ -1183,8 +1334,10 @@ elif st.session_state.page == "branchbusiness":
                 template=TEMPLATE,
             )
 
-        fig.update_traces(text=None)
-        st.plotly_chart(fig, use_container_width=True)
+        if fig is not None and chart_type != "Bar":
+            fig.update_traces(text=None)
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
 
         # display_grid_with_export(
         #     branch_month, f"Branch Sales - {selected_branch}", "branch_month_data"
@@ -1211,6 +1364,7 @@ elif st.session_state.page == "branchbusiness":
     branch_month["Month"] = branch_month["Month"].cat.remove_unused_categories()
 
     if not branch_month.empty and branch_month[value_col].sum() > 0:
+        fig = None
         if chart_type == "Bar":
             fig = px.bar(
                 branch_month,
@@ -1257,8 +1411,10 @@ elif st.session_state.page == "branchbusiness":
                 template=TEMPLATE,
             )
 
-        fig.update_traces(text=None)
-        st.plotly_chart(fig, use_container_width=True)
+        if fig is not None and chart_type != "Bar":
+            fig.update_traces(text=None)
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
 
         # display_grid_with_export(
         #     branch_month, f"Branch Sales - {selected_branch}", "branch_month_data"
@@ -1906,9 +2062,12 @@ elif st.session_state.page == "productcategorycomparison":
             unsafe_allow_html=True,
         )
 
-    metric_type == "Credit Note Sales"
-    value_col = "CNAmt"
-    title_prefix = "Credit Notes"
+    if metric_type == "Credit Note Sales":
+        value_col = "CNAmt"
+        title_prefix = "Credit Notes"
+    else:
+        value_col = "ActAmt"
+        title_prefix = "Sales"
     # else:
     #     filtered_df = filtered_df.copy()
     #     filtered_df["TotalAmt"] = filtered_df["ActAmt"] + filtered_df["CNAmt"]
@@ -2057,7 +2216,76 @@ elif st.session_state.page == "productcategorycomparison":
         )
 
 # =====================================================================
-# PAGE 8: ARIMA FORECASTING (from arima.ipynb)
+# PAGE 8: PRODUCT LOCATION CLUSTERING
+# =====================================================================
+elif st.session_state.page == "clusters":
+    st.header("Product Location Clustering")
+    st.markdown("Find which product has the highest sales in each location and estimate next-year profit.")
+
+    profit_margin = st.slider(
+        "Expected Profit Margin (%)",
+        min_value=0,
+        max_value=100,
+        value=20,
+        step=5,
+        help="Used to estimate next-year profit from projected sales.",
+    )
+
+    cluster_result = fetch_product_location_clusters(profit_margin)
+    if not cluster_result:
+        st.error("Could not load clustering data from backend.")
+        st.info("Start the backend with: cd backend then python main.py")
+    elif not cluster_result.get("records"):
+        st.warning("No sales data available for clustering. Load the CSV first.")
+    else:
+        best = cluster_result.get("best_product_location") or {}
+        metric_cols = st.columns(4)
+        with metric_cols[0]:
+            st.metric("Best Product", best.get("brand_name", "N/A"))
+        with metric_cols[1]:
+            st.metric("Best Location", f"{best.get('branch_name', 'N/A')} / {best.get('zone', 'N/A')}")
+        with metric_cols[2]:
+            st.metric("Total Sales", f"₹{best.get('total_sales', 0):,.0f}")
+        with metric_cols[3]:
+            st.metric("Next-Year Profit", f"₹{best.get('projected_next_year_profit', 0):,.0f}")
+
+        records_df = pd.DataFrame(cluster_result["records"])
+        display_cols = [
+            "cluster",
+            "brand_name",
+            "zone",
+            "branch_name",
+            "total_sales",
+            "total_qty",
+            "projected_next_year_sales",
+            "projected_next_year_profit",
+        ]
+        records_df = records_df[[col for col in display_cols if col in records_df.columns]]
+
+        st.markdown("### Product-location ranking")
+        display_grid_with_export(
+            records_df.round(2),
+            "Product Location Cluster Ranking",
+            "product_location_clusters",
+        )
+
+        st.markdown("### Cluster summary")
+        summary_df = pd.DataFrame(cluster_result.get("clusters", []))
+        if not summary_df.empty:
+            fig_summary = px.bar(
+                summary_df,
+                x="cluster",
+                y="total_sales",
+                color="cluster",
+                color_discrete_sequence=COLOR_SEQ,
+                template=TEMPLATE,
+                title="Sales by Cluster",
+            )
+            st.plotly_chart(fig_summary, use_container_width=True)
+            display_grid_with_export(summary_df.round(2), "Cluster Summary", "cluster_summary")
+
+# =====================================================================
+# PAGE 9: ARIMA FORECASTING (from arima.ipynb)
 # =====================================================================
 elif st.session_state.page == "arima":
     st.header("📈 ARIMA Sales Forecasting")
@@ -2098,8 +2326,14 @@ elif st.session_state.page == "arima":
         
         # ===== MODEL SUMMARY =====
         st.markdown("### 2️⃣ ARIMA Model Summary")
-        model = forecast_results['model']
-        st.text(model.summary())
+        model = forecast_results.get('model')
+        if model is not None:
+            try:
+                st.text(model.summary())
+            except Exception as e:
+                st.warning(f"Could not display model summary: {e}")
+        else:
+            st.info("Model not available — a fallback/simple forecast was used.")
         
         st.divider()
         
@@ -2280,26 +2514,6 @@ elif st.session_state.page == "arima":
             profit_margin_pct=profit_margin
         )
         st.plotly_chart(fig_pl, use_container_width=True)
-        
-        # Detailed profit/loss table
-        st.markdown("**📋 Weekly Profit Projection Details:**")
-        detailed_pl = forecast_results['forecast'].copy()
-        detailed_pl['Forecasted_Profit'] = detailed_pl['Forecasted_Sales'] * (profit_margin / 100)
-        detailed_pl['Weekly_Status'] = detailed_pl['Forecasted_Profit'].apply(
-            lambda x: '✅ Profit' if x > 0 else '❌ Loss'
-        )
-        detailed_pl = detailed_pl[['Date', 'Forecasted_Sales', 'Forecasted_Profit', 'Weekly_Status']]
-        detailed_pl.columns = ['Date', 'Sales (₹)', 'Profit (₹)', 'Status']
-        detailed_pl['Sales (₹)'] = detailed_pl['Sales (₹)'].round(0)
-        detailed_pl['Profit (₹)'] = detailed_pl['Profit (₹)'].round(0)
-        
-        display_grid_with_export(
-            detailed_pl,
-            "Weekly Profit/Loss Projection",
-            "arima_profit_loss"
-        )
-        
-        st.divider()
         
         # ===== INTERPRETATION GUIDE =====
         st.markdown("### 📚 How to Interpret Results")
