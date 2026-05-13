@@ -209,33 +209,6 @@ streamlit run app.py
 
 ---
 
-## 📁 Project Structure
-
-```
-AI-SalesMitra/
-├── app.py                          # Main Streamlit application
-├── requirements.txt                # Dependencies
-├── data/
-│   ├── sales_data.csv             # Historical sales
-│   ├── inventory.csv              # Stock levels
-│   └── customer_segments.csv       # Customer data
-├── models/
-│   ├── forecasting_model.pkl      # Pre-trained time-series
-│   ├── clustering_model.pkl       # K-means clusters
-│   └── rag_engine/                # RAG components
-├── utils/
-│   ├── data_processing.py         # Pandas preprocessing
-│   ├── ml_pipeline.py             # Scikit-learn workflows
-│   ├── forecasting.py             # Time-series functions
-│   ├── rag_handler.py             # RAG queries
-│   └── visualization.py           # Plotly charts
-└── config/
-    └── settings.yaml              # Configuration
-
-```
-
----
-
 ## 🚀 Advanced Features
 
 ### 🔬 Machine Learning Models
@@ -267,18 +240,6 @@ from utils.rag_handler import RAGEngine
 rag = RAGEngine(vectorstore='faiss')
 answer = rag.query("Which products had highest sales in Q3?")
 ```
-
-### 📊 Key Metrics Generated
-
-| Metric | Formula | Business Use |
-|--------|---------|--------------|
-| **MAPE** | Mean Absolute % Error | Forecast accuracy |
-| **Silhouette Score** | -1 to 1 | Clustering quality |
-| **Revenue Growth** | (Current - Previous) / Previous | Trend analysis |
-| **Inventory Turnover** | COGS / Avg Inventory | Efficiency metric |
-| **Customer Lifetime Value** | Total Revenue / Acquisition Cost | Profitability |
-
----
 
 ## 📈 Use Cases & Results
 
@@ -320,22 +281,21 @@ cd AI-SalesMitra
 
 # 2. Create virtual environment
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate for both frontend and backend folders
 
 # 3. Upgrade pip
 pip install --upgrade pip
 
 # 4. Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt for both folder
 
-# 5. Download pre-trained models
-python download_models.py
-
-# 6. Prepare data (optional)
-python scripts/prepare_data.py
+#5.backend running
+go to backend folder and run : uvicorn app:main --reload
 
 # 7. Run application
-streamlit run app.py
+go to the frontend folder and run the command : python -m streamlit run sample.py
+
+#8. If login is not working then do register home page.
 ```
 
 ### Environment Variables
