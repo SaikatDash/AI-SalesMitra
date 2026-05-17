@@ -2,7 +2,6 @@ from datetime import datetime
 from pathlib import Path
 import sys
 from typing import Generator, List, Optional
-
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -10,8 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine
 from database_model import Base, User, SalesData
-from model import UserRegister, UserLogin, UserUpdate, UserResponse, loginresponse, SalesDataResponse
-
+from model  import UserRegister, UserLogin, UserUpdate, UserResponse, loginresponse, SalesDataResponse
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
