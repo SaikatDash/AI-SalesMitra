@@ -2,10 +2,17 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# Use DATABASE_URL env var if provided, otherwise fallback to PostgreSQL
-# In Docker: db:5432 (service name)
-# Locally: localhost:5432
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:sys449420@db:5432/salesmitra')#not localhost because csv service runs in a separate container
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    if os.getenv("RENDER") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("FLY_APP_NAME"):
+        raise RuntimeError(
+            "DATABASE_URL is required in deployed environments. "
+            "Use the public/internal PostgreSQL connection string from your hosting provider."
+        )
+
+    # Local default. Docker Compose overrides this with db:5432.
+    DATABASE_URL = "postgresql://postgres:sys449420@localhost:5432/salesmitra"
 
 # SQLite needs connect_args; other DBs do not
 connect_args = {}
