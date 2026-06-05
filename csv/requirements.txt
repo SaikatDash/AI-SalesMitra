@@ -7,5 +7,7 @@ uvicorn==0.28.0
 requests==2.31.0
 starlette==0.27.0
 anyio==3.7.1
-pandas==2.0.0
-openpyxl==3.0.9
+pandas>=2.3.3,<3
+openpyxl>=3.1.5,<4
+#mysql-connector-python>=8.4,<10
+#pyodbc>=4.0.34,<5

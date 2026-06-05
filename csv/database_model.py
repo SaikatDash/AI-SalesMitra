@@ -10,6 +10,26 @@ class SalesData(Base):
     __tablename__ = 'sales_data'
     
     id = Column(Integer, primary_key=True, index=True)
+    ac_yr = Column(String(10), index=True)  # Accounting Year
+    mmyyyy = Column(String(7), index=True)  # Month-Year
+    zone = Column(String(50), index=True)
+    branch_name = Column(String(150), index=True)
+    mkt_type = Column(String(50))
+    brand_name = Column(String(150), index=True)
+    sales_qty = Column(Float)
+    sales_amt = Column(Float)
+    cn_qty = Column(Float, nullable=True)
+    cn_amt = Column(Float, nullable=True)
+    act_qty = Column(Float, nullable=True)
+    act_amt = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+'''
+for postgre,
+class SalesData(Base):
+    """Sales data model from CSV"""
+    __tablename__ = 'sales_data'
+    
+    id = Column(Integer, primary_key=True, index=True)
     ac_yr = Column(String, index=True)  # Accounting Year
     mmyyyy = Column(String, index=True)  # Month-Year
     zone = Column(String, index=True)
@@ -23,3 +43,4 @@ class SalesData(Base):
     act_qty = Column(Float, nullable=True)
     act_amt = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+'''

@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 # ============================================
 # CONFIGURATION
 # ============================================
-API_BASE_URL = "http://localhost:8000"  # Backend URL
+API_BASE_URL = st.secrets.get("API_BASE_URL", "http://localhost:8000").rstrip("/")
 st.set_page_config(page_title="SalesMitraAI:You Personal Sales Assistant API", layout="wide", initial_sidebar_state="collapsed")
 
 # ============================================

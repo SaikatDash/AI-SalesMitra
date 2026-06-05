@@ -35,7 +35,7 @@ COLOR_SEQ = px.colors.qualitative.Bold  # colorful discrete palette [web:16][web
 TEMPLATE = "plotly_dark"               # dark stylish template [web:25]
 
 # ---------- API CONFIGURATION ----------
-API_BASE_URL = "http://127.0.0.1:8000"
+API_BASE_URL = st.secrets.get("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
 # ---------- DATA LOAD FROM API ----------
@@ -86,7 +86,7 @@ with st.spinner("⏳ Loading sales data from database..."):
 
 # Show error only if API failed completely
 if df is None:
-    st.error("❌ Cannot connect to backend API at http://127.0.0.1:8000")
+    st.error(f"❌ Cannot connect to backend API at {API_BASE_URL}")
     st.info("✅ Please ensure the FastAPI backend is running:\n\nIn terminal, run:\n```\ncd backend\npython main.py\n```")
     st.stop()
 
@@ -144,24 +144,24 @@ df["Month"] = pd.Categorical(
 
 df["Month_num"] = df["MMYYYY"].dt.month
 month_to_quarter = {
-    1: "Q1",
-    2: "Q1",
-    3: "Q1",
-    4: "Q2",
-    5: "Q2",
-    6: "Q2",
-    7: "Q3",
-    8: "Q3",
-    9: "Q3",
-    10: "Q4",
-    11: "Q4",
-    12: "Q4",
+    1: "Q1(April-June)",
+    2: "Q1(April-June)",
+    3: "Q1(April-June)",
+    4: "Q2(May-July)",
+    5: "Q2(May-July)",
+    6: "Q2(May-July)",
+    7: "Q3(August-October)",
+    8: "Q3(August-October)",
+    9: "Q3(August-October)",
+    10: "Q4(November-March)",
+    11: "Q4(November-March)",
+    12: "Q4(November-March)",
 }
 df["Quarter"] = df["Month_num"].map(month_to_quarter)
 
 years = sorted(df["Year"].unique())
 months = list(df["Month"].unique())
-quarters = ["Q1", "Q2", "Q3", "Q4"]
+quarters = ["Q1(April-June)", "Q2(May-July)", "Q3(August-October)", "Q4(November-March)"]
 
 # ---- Financial year labels (YYYY-YY) ----
 base_years = years

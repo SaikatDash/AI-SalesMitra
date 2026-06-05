@@ -1,7 +1,30 @@
 import pandas as pd
+from fastapi import Depends, FastAPI
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine
 from database_model import Base, SalesData
+from model import SalesDataResponse
+
+
+app = FastAPI(title="AI-SalesMitra CSV Import API", version="1.0.0")
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "csv-import"}
+
+
+@app.get("/sales", response_model=list[SalesDataResponse])
+def get_sales(limit: int = 100, skip: int = 0, db: Session = Depends(get_db)):
+    return db.query(SalesData).offset(skip).limit(limit).all()
 
 
 CSV_TO_DB_COLUMNS = {
@@ -18,6 +41,24 @@ CSV_TO_DB_COLUMNS = {
     'ActQty': 'act_qty',
     'ActAmt': 'act_amt',
 }
+
+
+def build_sales_record(row) -> SalesData:
+    """Pipeline: Convert a row dict to a SalesData ORM object using clean functions."""
+    return SalesData(
+        ac_yr=_clean_text(row.get('AcYr')),
+        mmyyyy=_clean_text(row.get('MMYYYY')),
+        zone=_clean_text(row.get('Zone')),
+        branch_name=_clean_text(row.get('BranchName')),
+        mkt_type=_clean_text(row.get('MKTType')),
+        brand_name=_clean_text(row.get('BrandName')),
+        sales_qty=_clean_number(row.get('SalesQty'), 0) or 0,
+        sales_amt=_clean_number(row.get('SalesAmt'), 0) or 0,
+        cn_qty=_clean_number(row.get('CNQty'), None),
+        cn_amt=_clean_number(row.get('CNAmt'), None),
+        act_qty=_clean_number(row.get('ActQty'), None),
+        act_amt=_clean_number(row.get('ActAmt'), None),
+    )
 
 
 def _clean_text(value) -> str:
@@ -112,20 +153,7 @@ def load_csv_to_database(csv_file: str = "C:\\CODE\\python projects\\sir\\AI-Sal
 
         # Insert only rows that are not already present. Dedupe by full row, not by year.
         for row in new_records:
-            sales_record = SalesData(
-                ac_yr=_clean_text(row.get('AcYr')),
-                mmyyyy=_clean_text(row.get('MMYYYY')),
-                zone=_clean_text(row.get('Zone')),
-                branch_name=_clean_text(row.get('BranchName')),
-                mkt_type=_clean_text(row.get('MKTType')),
-                brand_name=_clean_text(row.get('BrandName')),
-                sales_qty=_clean_number(row.get('SalesQty'), 0) or 0,
-                sales_amt=_clean_number(row.get('SalesAmt'), 0) or 0,
-                cn_qty=_clean_number(row.get('CNQty'), None),
-                cn_amt=_clean_number(row.get('CNAmt'), None),
-                act_qty=_clean_number(row.get('ActQty'), None),
-                act_amt=_clean_number(row.get('ActAmt'), None),
-            )
+            sales_record = build_sales_record(row)
             db.add(sales_record)
 
         db.commit()

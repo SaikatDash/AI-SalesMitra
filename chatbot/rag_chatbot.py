@@ -234,6 +234,12 @@ class SalesMitraChatbot:
                     "a report? How do I load CSV data? How do I start the backend and frontend?"
                 ),
             },
+            {
+                "title": "Chatbot question guide",
+                "route": "Chatbot Guide",
+                "content": (
+                    "Try asking about forecasting, dashboard options, sales insights, setup steps, or report "
+            )}
         ]
 
     def answer(self, query: str) -> Dict[str, Any]:

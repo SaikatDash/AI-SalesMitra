@@ -7,9 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from database import SessionLocal, engine
-from database_model import Base, User, SalesData
-from model  import UserRegister, UserLogin, UserUpdate, UserResponse, loginresponse, SalesDataResponse
+from .database import SessionLocal, engine
+from .database_model import Base, User, SalesData
+from .model  import UserRegister, UserLogin, UserUpdate, UserResponse, loginresponse, SalesDataResponse
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
@@ -119,6 +119,9 @@ def get_sales(
     zone: Optional[str] = None,
     branch: Optional[str] = None,
     brand: Optional[str] = None,
+    mkt_type: Optional[str] = None,
+    mmyyyy: Optional[str] = None,
+    ac_yr: Optional[str] = None,
     limit: int = 1000,
     skip: int = 0,
     db: Session = Depends(get_db)

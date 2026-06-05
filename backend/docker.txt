@@ -1,0 +1,104 @@
+Step 1: Create the Files First
+You still need to create two files (I can't do this via GUI):
+
+Create docker-compose.yml in your project root (C:\CODE\python projects\sir\AI-SalesMitra\):
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: sales_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://admin:password123@db:5432/sales_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+Create Dockerfile in C:\CODE\python projects\sir\AI-SalesMitra\backend\:
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+Step 2: Use Docker Desktop GUI
+Method 1: Use Docker Desktop CLI Inside GUI (Easiest)
+Open Docker Desktop application
+Click the Terminal icon at the top (or open PowerShell)
+Navigate to your project root:cd "C:\CODE\python projects\sir\AI-SalesMitra"
+Run:docker-compose up --build
+Watch the build happen in real-time in the terminal
+
+
+Method 2: Pure Docker Desktop GUI (No Terminal)
+Open Docker Desktop
+Go to the Images tab
+Click Build button (top-right)
+Select your backend folder
+Wait for it to build
+Then:
+
+Go to Containers tab
+Click + Create
+Set up PostgreSQL first:
+Image: postgres:15
+Port: 5432
+Env vars: POSTGRES_USER=admin, POSTGRES_PASSWORD=password123, POSTGRES_DB=sales_db
+Then create another container for your backend using the built image
+However, this is manual and error-prone. I recommend Method 1 — it's faster and uses docker-compose which handles everything automatically.
+
+Step 3: Monitor in Docker Desktop
+Once running (via either method):
+
+Go to Containers tab in Docker Desktop
+
+You'll see:
+
+ai-salesmitra-db-1 (PostgreSQL running)
+ai-salesmitra-backend-1 (FastAPI running)
+Click on backend container → see live logs
+
+Verify it's working: http://localhost:8000/docs
+
+Step 4: Stop/Restart via GUI
+In Containers tab:
+
+Right-click a container → Stop
+Right-click a container → Start
+Right-click a container → Remove
+Bottom line: Use Method 1 (CLI inside Docker Desktop) — it's the fastest and cleanest way to build and run everything automatically! 🐳
+
+
+Remove lastest image : docker rmi ai-salesmitra-backend
+Remove everything (containers, images, volumes, networks):docker system prune -a --volumes
+Remove backend image:docker rmi ai-salesmitra-backend
