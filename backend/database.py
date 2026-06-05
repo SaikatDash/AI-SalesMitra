@@ -1,5 +1,6 @@
 import os
 from sqlalchemy import create_engine
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -23,4 +24,15 @@ engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-__all__ = ["engine", "SessionLocal", "DATABASE_URL"]
+def get_database_info() -> dict:
+    url = make_url(DATABASE_URL)
+    return {
+        "driver": url.drivername,
+        "host": url.host,
+        "port": url.port,
+        "database": url.database,
+        "username": url.username,
+    }
+
+
+__all__ = ["engine", "SessionLocal", "DATABASE_URL", "get_database_info"]

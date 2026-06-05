@@ -5,9 +5,11 @@ from typing import Generator, List, Optional
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from .database import SessionLocal, engine
+from .database import SessionLocal, engine, get_database_info
 from .database_model import Base, User, SalesData
 from .model  import UserRegister, UserLogin, UserUpdate, UserResponse, loginresponse, SalesDataResponse
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,11 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from chatbot.rag_chatbot import SalesMitraChatbot, product_location_cluster_analysis
 
-
-# Ensure tables exist
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title="AISalesMitra:You Personal Sales Assistant API", version="1.0.0")
+app.state.database_startup_error = None
 
 # Add CORS middleware to allow requests from Streamlit
 app.add_middleware(
@@ -32,10 +31,25 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def initialize_database() -> None:
+    try:
+        Base.metadata.create_all(bind=engine)
+    except SQLAlchemyError as exc:
+        app.state.database_startup_error = str(exc)
+        print(f"Database startup check failed: {exc}")
+
+
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
+        db.execute(text("SELECT 1"))
         yield db
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable. Check the backend DATABASE_URL environment variable.",
+        ) from exc
     finally:
         db.close()
 
@@ -57,6 +71,35 @@ class ChatbotQuery(BaseModel):
 @app.get("/")
 def root():
     return {"status": "ok"}
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/health/db")
+def database_health():
+    info = get_database_info()
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return {
+            "status": "ok",
+            "database": info,
+            "startup_error": app.state.database_startup_error,
+        }
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "error",
+                "message": "Database unavailable. Set DATABASE_URL to a reachable hosted PostgreSQL database.",
+                "database": info,
+                "error": str(exc),
+                "startup_error": app.state.database_startup_error,
+            },
+        ) from exc
 
 
 @app.post("/api/register", status_code=201)
