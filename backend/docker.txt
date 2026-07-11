@@ -102,3 +102,18 @@ Bottom line: Use Method 1 (CLI inside Docker Desktop) — it's the fastest and c
 Remove lastest image : docker rmi ai-salesmitra-backend
 Remove everything (containers, images, volumes, networks):docker system prune -a --volumes
 Remove backend image:docker rmi ai-salesmitra-backend
+
+
+Render cannot deploy the local Docker Desktop image directly. You need to push it to Docker Hub first.
+
+Run these in your terminal:
+
+docker login
+docker tag ai-salesmitra-backend:latest saikat449/ai-salesmitra-backend:latest
+docker push saikat449/ai-salesmitra-backend:latest
+Then in Render, use this image URL:
+
+docker.io/saikat449/ai-salesmitra-backend:latest
+If the Docker Hub repo is private, keep the Render credential selected and make sure it uses the same Docker Hub account/token. If you want the easiest path, make the Docker Hub repository public temporarily, then Render should validate the image URL without credentials.
+
+Right now the issue is simply: Docker Desktop shows a local image, but Render can only pull from a remote registry.
