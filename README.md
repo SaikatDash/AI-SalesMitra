@@ -39,25 +39,9 @@
 ## 🚀 Live Deployment
 
 - **Live Streamlit dashboard:** [yoursalesmitra.streamlit.app](https://yoursalesmitra.streamlit.app/)
-- **Render backend:** [ai-salesmitra-dnxg.onrender.com](https://ai-salesmitra-dnxg.onrender.com/)
-- **Backend health check:** [API health](https://ai-salesmitra-dnxg.onrender.com/api/health)
 
 The Streamlit frontend communicates with the FastAPI backend deployed on Render, and
 the backend connects to the hosted PostgreSQL database.
-
-### Streamlit Cloud configuration
-
-In Streamlit Cloud, open **App settings → Secrets** and add:
-
-```toml
-API_BASE_URL = "https://ai-salesmitra-dnxg.onrender.com"
-```
-
-Do not append `/api`; the frontend adds API paths such as `/api/login` and `/api/sales`.
-Keep database credentials and API keys in the Render backend environment variables,
-not in Streamlit Cloud or the repository.
-
----
 
 ## 🎯 Project Vision
 
