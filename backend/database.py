@@ -23,7 +23,7 @@ if DATABASE_URL.startswith('sqlite'):
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-'''
+
 def get_database_info() -> dict:
     url = make_url(DATABASE_URL)
     return {
@@ -34,6 +34,4 @@ def get_database_info() -> dict:
         "username": url.username,
     }
 
-
 __all__ = ["engine", "SessionLocal", "DATABASE_URL", "get_database_info"]
-'''
