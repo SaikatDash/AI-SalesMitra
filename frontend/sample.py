@@ -37,13 +37,15 @@ section[data-testid="stSidebar"]{
 # API & CONFIG
 # ======================================================
 def get_api_url():
+    try:
+        secret_url = st.secrets["API_BASE_URL"]
+        if secret_url:
+            return secret_url.rstrip("/")
+    except Exception:
+        pass
     env_url = os.getenv("API_BASE_URL")
     if env_url:
         return env_url.rstrip("/")
-    try:
-        return st.secrets["API_BASE_URL"].rstrip("/")
-    except Exception:
-        pass
     return "https://ai-salesmitra-dnxg.onrender.com"
 
 API_BASE_URL = get_api_url()
