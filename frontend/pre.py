@@ -14,16 +14,15 @@ import streamlit.components.v1 as components
 # CONFIGURATION
 # ============================================
 st.set_page_config(page_title="SalesMitraAI:You Personal Sales Assistant API", layout="wide", initial_sidebar_state="expanded")
+
+# Resolve the backend URL once. The second assignment previously replaced the
+# Streamlit secret with localhost whenever API_BASE_URL was not an environment
+# variable, which made Streamlit Cloud send requests back to itself.
 try:
     API_BASE_URL = st.secrets["API_BASE_URL"]
 except Exception:
-    API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-
+    API_BASE_URL = os.getenv("API_BASE_URL", "https://ai-salesmitra-dnxg.onrender.com")
 API_BASE_URL = API_BASE_URL.rstrip("/")
-API_BASE_URL = os.getenv(
-    "API_BASE_URL",
-    "http://localhost:8000"
-).rstrip("/")
 
 # ============================================
 # SESSION STATE INITIALIZATION

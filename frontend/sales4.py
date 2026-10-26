@@ -36,7 +36,7 @@ COLOR_SEQ = px.colors.qualitative.Bold  # colorful discrete palette [web:16][web
 TEMPLATE = "plotly_dark"               # dark stylish template [web:25]
 
 # ---------- API CONFIGURATION ----------
-API_BASE_URL = os.getenv("API_BASE_URL", st.secrets.get("API_BASE_URL", "http://127.0.0.1:8000")).rstrip("/")
+API_BASE_URL = os.getenv("API_BASE_URL", st.secrets.get("API_BASE_URL", "https://ai-salesmitra-dnxg.onrender.com")).rstrip("/")
 
 
 # ---------- DATA LOAD FROM API ----------
