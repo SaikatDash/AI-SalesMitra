@@ -50,7 +50,6 @@ def get_api_url():
     return "https://ai-salesmitra-dnxg.onrender.com"
 
 API_BASE_URL = get_api_url()
-st.sidebar.write("Backend URL:", API_BASE_URL)
 
 def backend_available():
     try:
