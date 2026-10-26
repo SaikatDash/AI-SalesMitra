@@ -35,14 +35,6 @@
 </p>
 
 ---
-
-## 🚀 Live Deployment
-
-- **Live Streamlit dashboard:** [yoursalesmitra.streamlit.app](https://yoursalesmitra.streamlit.app/)
-
-The Streamlit frontend communicates with the FastAPI backend deployed on Render, and
-the backend connects to the hosted PostgreSQL database.
-
 ## 🎯 Project Vision
 
 **AI-SalesMitra** is an **enterprise-grade AI/ML solution** that revolutionizes pharmaceutical sales by combining:
@@ -144,6 +136,12 @@ streamlit run app.py
 ✨ **Dashboard opens at** `http://localhost:8501`
 
 ---
+## 🚀 Live Deployment
+
+- **Live Streamlit dashboard:** [yoursalesmitra.streamlit.app](https://yoursalesmitra.streamlit.app/)
+
+The Streamlit frontend communicates with the FastAPI backend deployed on Render, and
+the backend connects to the hosted PostgreSQL database.
 
 ## 📊 Dashboard Features
 
