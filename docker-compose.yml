@@ -26,6 +26,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      env_file:
+      - .env
 
   frontend:
     build:
@@ -40,3 +42,6 @@ services:
 
 volumes:
   postgres_data:
+
+version: "3.9"
+

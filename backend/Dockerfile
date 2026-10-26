@@ -21,3 +21,15 @@ EXPOSE 8000
 # Run uvicorn from /app pointing to backend.main.
 # Cloud hosts commonly provide PORT; default to 8000 for local Docker.
 CMD uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY . .
+
+RUN pip install -r requirements.txt
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

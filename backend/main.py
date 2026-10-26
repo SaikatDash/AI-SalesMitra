@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine, get_database_info
-from database_model import Base, User, SalesData
-from model import (
+from backend.database import SessionLocal, engine, get_database_info
+from backend.database_model import Base, User, SalesData
+from backend.model import (
     UserRegister,
     UserLogin,
     UserUpdate,
@@ -18,6 +18,7 @@ from model import (
     loginresponse,
     SalesDataResponse,
 )
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))

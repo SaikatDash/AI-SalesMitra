@@ -13,4 +13,5 @@ COPY frontend ./frontend
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "frontend/sample.py", "--server.address=0.0.0.0", "--server.port=8501"]
+# Render provides PORT at runtime; keep 8501 as the local Docker default.
+CMD ["sh", "-c", "streamlit run frontend/sample.py --server.address=0.0.0.0 --server.port=${PORT:-8501}"]
