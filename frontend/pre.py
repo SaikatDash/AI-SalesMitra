@@ -14,10 +14,6 @@ import streamlit.components.v1 as components
 # CONFIGURATION
 # ============================================
 st.set_page_config(page_title="SalesMitraAI:You Personal Sales Assistant API", layout="wide", initial_sidebar_state="expanded")
-
-# Resolve the backend URL once. The second assignment previously replaced the
-# Streamlit secret with localhost whenever API_BASE_URL was not an environment
-# variable, which made Streamlit Cloud send requests back to itself.
 try:
     API_BASE_URL = st.secrets["API_BASE_URL"]
 except Exception:
