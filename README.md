@@ -26,13 +26,36 @@
 </div>
 
 <p align="center">
-  <a href="https://aisalesmitra-demo.streamlit.app">
+  <a href="https://yoursalesmitra.streamlit.app/">
     <img src="https://img.shields.io/badge/🚀_LIVE_DEMO-CLICK_HERE-00D9FF?style=for-the-badge" alt="Live Demo" />
   </a>
   <a href="https://github.com/SaikatDash/Medicine-Sales-Analysis-Dashboard-with-Future-Business-Predictions">
     <img src="https://img.shields.io/badge/📂_GITHUB-REPO-black?style=for-the-badge&logo=github" alt="GitHub" />
   </a>
 </p>
+
+---
+
+## 🚀 Live Deployment
+
+- **Live Streamlit dashboard:** [yoursalesmitra.streamlit.app](https://yoursalesmitra.streamlit.app/)
+- **Render backend:** [ai-salesmitra-dnxg.onrender.com](https://ai-salesmitra-dnxg.onrender.com/)
+- **Backend health check:** [API health](https://ai-salesmitra-dnxg.onrender.com/api/health)
+
+The Streamlit frontend communicates with the FastAPI backend deployed on Render, and
+the backend connects to the hosted PostgreSQL database.
+
+### Streamlit Cloud configuration
+
+In Streamlit Cloud, open **App settings → Secrets** and add:
+
+```toml
+API_BASE_URL = "https://ai-salesmitra-dnxg.onrender.com"
+```
+
+Do not append `/api`; the frontend adds API paths such as `/api/login` and `/api/sales`.
+Keep database credentials and API keys in the Render backend environment variables,
+not in Streamlit Cloud or the repository.
 
 ---
 
@@ -289,22 +312,22 @@ pip install --upgrade pip
 # 4. Install dependencies
 pip install -r requirements.txt for both folder
 
-#5.backend running
-go to backend folder and run : uvicorn app:main --reload
+# 5. Backend running (local)
+python -m uvicorn backend.main:app --reload
 
-# 7. Run application
-go to the frontend folder and run the command : python -m streamlit run sample.py
+# 6. Run the frontend (local)
+python -m streamlit run frontend/sales_app.py
 
-#8. If login is not working then do register home page.
+# 7. If login is not working, register a new account from the home page.
 ```
 
 ### Environment Variables
-Create `.env` file:
+For local development, create `backend/.env` and keep it out of Git:
 ```env
-STREAMLIT_SERVER_HEADLESS=true
-MODEL_PATH=./models/
-DATA_PATH=./data/
-LOG_LEVEL=INFO
+DATABASE_URL=<local-or-hosted-postgresql-url>
+GOOGLE_API_KEY=<your-google-api-key>
+HOST=0.0.0.0
+PORT=8000
 ```
 ---
 
