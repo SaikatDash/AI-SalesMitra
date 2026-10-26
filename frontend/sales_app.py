@@ -3,13 +3,13 @@ import streamlit as st
 
 
 home_page = st.Page(
-    page ="Pages/home.py",
+    page="sample.py",
     title ="Home Page",
     default = True,
 )
 
 sales_Analytics = st.Page(
-    page ="frontend/sales4.py",
+    page="sales4.py",
     title ="sales Page",
 )
 
