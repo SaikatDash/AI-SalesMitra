@@ -226,7 +226,7 @@ def run_arima_forecast(data: pd.DataFrame, arima_order=(2, 1, 2), test_size=30, 
         mae = mean_absolute_error(backtest_actual.values, backtest_pred) if len(backtest_pred)>0 else 0.0
         return {
             'historical': historical_df,
-            'backtest': backtest_df,
+            'backtest': backtest_df,x``
             'forecast': forecast_df,
             'model': None,
             'metrics': {'rmse': rmse, 'mae': mae},
