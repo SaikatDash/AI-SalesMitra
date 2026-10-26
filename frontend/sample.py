@@ -44,9 +44,10 @@ def get_api_url():
         return st.secrets["API_BASE_URL"].rstrip("/")
     except Exception:
         pass
-    return "http://localhost:8000"
+    return "https://ai-salesmitra-dnxg.onrender.com"
 
 API_BASE_URL = get_api_url()
+st.sidebar.write("Backend URL:", API_BASE_URL)
 
 def backend_available():
     try:
