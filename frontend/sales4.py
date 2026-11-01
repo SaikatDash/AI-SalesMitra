@@ -31,12 +31,39 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+st.markdown("""
+<style>
+section[data-testid="stSidebar"] {
+    background:#25262d !important;
+    border-right:1px solid #3b3c45;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1 {
+    color:#f5f6fa;
+    font-size:1.55rem;
+}
+section[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+    background:#484954;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- GLOBAL PLOT SETTINGS ----------
 COLOR_SEQ = px.colors.qualitative.Bold  # colorful discrete palette [web:16][web:17]
 TEMPLATE = "plotly_dark"               # dark stylish template [web:25]
 
 # ---------- API CONFIGURATION ----------
-API_BASE_URL = os.getenv("API_BASE_URL", st.secrets.get("API_BASE_URL", "https://ai-salesmitra-dnxg.onrender.com")).rstrip("/")
+def get_api_base_url():
+    """Read an optional Streamlit secret without failing when no secrets.toml exists."""
+    secret_url = None
+    try:
+        secret_url = st.secrets["API_BASE_URL"]
+    except Exception:
+        pass
+    return (os.getenv("API_BASE_URL") or secret_url or "https://ai-salesmitra-dnxg.onrender.com").rstrip("/")
+
+
+API_BASE_URL = get_api_base_url()
+API_TIMEOUT = (10, 120)  # Allow time for an idle Render service to wake up.
 
 
 # ---------- DATA LOAD FROM API ----------
@@ -45,7 +72,7 @@ def fetch_sales_data_from_api():
     """Fetch sales data from FastAPI backend"""
     try:
         # First get total record count so we can request all rows
-        summary = requests.get(f"{API_BASE_URL}/api/sales/summary", timeout=5)
+        summary = requests.get(f"{API_BASE_URL}/api/sales/summary", timeout=API_TIMEOUT)
         total = None
         if summary.status_code == 200:
             try:
@@ -54,7 +81,7 @@ def fetch_sales_data_from_api():
                 total = None
 
         limit = total if total and total > 0 else 1000000
-        response = requests.get(f"{API_BASE_URL}/api/sales", params={"limit": limit}, timeout=30)
+        response = requests.get(f"{API_BASE_URL}/api/sales", params={"limit": limit}, timeout=API_TIMEOUT)
         if response.status_code == 200:
             data = response.json()
             if data:
@@ -74,7 +101,7 @@ def fetch_product_location_clusters(profit_margin_pct=20):
         response = requests.get(
             f"{API_BASE_URL}/api/analytics/product-location-clusters",
             params={"profit_margin_pct": profit_margin_pct, "limit": 100},
-            timeout=30,
+            timeout=API_TIMEOUT,
         )
         if response.status_code == 200:
             return response.json()
@@ -82,8 +109,101 @@ def fetch_product_location_clusters(profit_margin_pct=20):
     except Exception:
         return None
 
+# Render the uploader before network calls so it remains visible while Render wakes up.
+active_dataset_id = st.session_state.get("active_dataset_id")
+session_token = st.session_state.get("access_token")
+if st.session_state.get("user_logged_in") and session_token:
+    with st.sidebar.expander("📤 Upload sales data", expanded=active_dataset_id is None):
+        with st.sidebar.form("sales4_dataset_upload", clear_on_submit=True):
+            uploaded_sales_file = st.file_uploader(
+                "Choose a sales file", type=["csv", "xls", "xlsx", "xlsm", "pdf"], key="sales4_upload_file"
+            )
+            upload_clicked = st.form_submit_button("Upload and analyze", width="stretch")
+        if upload_clicked:
+            if uploaded_sales_file is None:
+                st.sidebar.warning("Choose a file first.")
+            else:
+                try:
+                    upload_response = requests.post(
+                        f"{API_BASE_URL}/api/datasets/upload",
+                        headers={"Authorization": f"Bearer {session_token}"},
+                        files={"file": (uploaded_sales_file.name, uploaded_sales_file.getvalue(),
+                                         uploaded_sales_file.type or "application/octet-stream")},
+                        timeout=(10, 180),
+                    )
+                    if upload_response.status_code == 200:
+                        try:
+                            upload_result = upload_response.json()
+                        except ValueError:
+                            upload_result = None
+                        if isinstance(upload_result, dict) and "id" in upload_result:
+                            st.session_state.active_dataset_id = upload_result["id"]
+                            st.session_state.sales4_upload_result = upload_result
+                            st.rerun()
+                        else:
+                            st.sidebar.error("The backend returned an unreadable upload result. Please try again.")
+                    else:
+                        try:
+                            error_body = upload_response.json()
+                        except ValueError:
+                            error_body = {}
+                        if upload_response.status_code == 404:
+                            st.sidebar.error(
+                                "The configured backend does not include the uploaded-data API yet. "
+                                "Redeploy the backend with this project version, then retry the upload."
+                            )
+                        else:
+                            st.sidebar.error(error_body.get("detail", "Upload failed.") if isinstance(error_body, dict) else "Upload failed.")
+                except requests.Timeout:
+                    st.sidebar.error("The backend is still starting. Wait a minute and try the upload again.")
+                except requests.RequestException as exc:
+                    st.sidebar.error(f"Upload failed: {exc}")
+
+upload_result = st.session_state.pop("sales4_upload_result", None)
+if upload_result:
+    st.success(f"{'Created' if upload_result['created'] else 'Reused'} dataset: {upload_result['name']} ({upload_result['row_count']:,} rows).")
+    st.markdown("**Gemini analysis**")
+    st.markdown(upload_result["insight"])
+
 with st.spinner("⏳ Loading sales data from database..."):
     df = fetch_sales_data_from_api()
+
+# A user can select one of their uploaded datasets and run this dashboard against it.
+if st.session_state.get("user_logged_in") and session_token:
+    try:
+        datasets_response = requests.get(
+            f"{API_BASE_URL}/api/datasets",
+            headers={"Authorization": f"Bearer {session_token}"},
+            timeout=API_TIMEOUT,
+        )
+        user_datasets = datasets_response.json() if datasets_response.status_code == 200 else []
+        if not isinstance(user_datasets, list):
+            user_datasets = []
+    except (requests.RequestException, ValueError):
+        user_datasets = []
+    if user_datasets:
+        dataset_map = {item["id"]: item for item in user_datasets}
+        choices = [None, *dataset_map]
+        choice = st.sidebar.selectbox(
+            "Active sales dataset",
+            choices,
+            index=choices.index(active_dataset_id) if active_dataset_id in choices else 0,
+            format_func=lambda item_id: "Default sales data" if item_id is None else dataset_map[item_id]["name"],
+        )
+        st.session_state.active_dataset_id = choice
+        if choice is not None:
+            try:
+                rows_response = requests.get(
+                    f"{API_BASE_URL}/api/datasets/{choice}/rows",
+                    headers={"Authorization": f"Bearer {session_token}"},
+                    timeout=API_TIMEOUT,
+                )
+                if rows_response.status_code == 200:
+                    df = pd.DataFrame(rows_response.json())
+                else:
+                    st.error("Could not load the selected uploaded dataset.")
+            except requests.RequestException as exc:
+                st.error(f"Could not load the selected uploaded dataset: {exc}")
 
 # Show error only if API failed completely
 if df is None:
@@ -112,12 +232,56 @@ df = df.rename(columns={
     'act_amt': 'ActAmt'
 })
 
-df["MMYYYY"] = pd.to_datetime(df["MMYYYY"], format="%Y-%m", errors="coerce")
+# Map common sales headers from arbitrary uploads onto the dashboard's existing fields.
+if not df.empty:
+    aliases = {
+        "AcYr": ("financial year", "accounting year", "year"),
+        "MMYYYY": ("date", "month", "period", "month year", "mmyyyy"),
+        "Zone": ("zone", "region", "territory"),
+        "BranchName": ("branch", "location", "store", "outlet"),
+        "MKTType": ("market type", "channel", "segment"),
+        "BrandName": ("brand", "product", "item", "sku", "category"),
+        "SalesQty": ("sales qty", "quantity", "units", "volume"),
+        "SalesAmt": ("sales amount", "sales", "revenue", "amount", "total sales"),
+        "CNQty": ("credit note qty", "return qty", "returned units"),
+        "CNAmt": ("credit note amount", "returns", "refund amount"),
+        "ActQty": ("actual qty", "net quantity"),
+        "ActAmt": ("actual amount", "net sales", "net revenue"),
+    }
+    normalized_columns = {str(column).strip().lower().replace("_", " "): column for column in df.columns}
+    for target, candidates in aliases.items():
+        if target not in df.columns:
+            match = next((original for normalized, original in normalized_columns.items()
+                          if any(candidate in normalized for candidate in candidates)), None)
+            if match is not None:
+                df = df.rename(columns={match: target})
+    for column in ("AcYr", "Zone", "BranchName", "MKTType", "BrandName"):
+        if column not in df:
+            df[column] = "Unknown"
+    if "SalesAmt" not in df:
+        df["SalesAmt"] = df["ActAmt"] if "ActAmt" in df else 0
+    if "SalesQty" not in df:
+        df["SalesQty"] = df["ActQty"] if "ActQty" in df else 0
+    if "ActAmt" not in df:
+        df["ActAmt"] = df["SalesAmt"]
+    if "ActQty" not in df:
+        df["ActQty"] = df["SalesQty"]
+    for column in ("CNQty", "CNAmt"):
+        if column not in df:
+            df[column] = 0
+    if "MMYYYY" not in df:
+        df["MMYYYY"] = pd.date_range("2020-01-01", periods=len(df), freq="MS")
+
+df["MMYYYY"] = pd.to_datetime(df["MMYYYY"], errors="coerce")
+if active_dataset_id is not None and df["MMYYYY"].isna().all():
+    df["MMYYYY"] = pd.date_range("2020-01-01", periods=len(df), freq="MS")
 df = df.dropna(subset=["MMYYYY"])
 df["Year"] = df["MMYYYY"].dt.year
 df["Month"] = df["MMYYYY"].dt.strftime("%B")
 
 # Fill missing values
+for numeric_column in ("SalesQty", "SalesAmt", "CNQty", "CNAmt", "ActQty", "ActAmt"):
+    df[numeric_column] = pd.to_numeric(df[numeric_column], errors="coerce")
 df['ActQty'] = df['ActQty'].fillna(0)
 df['ActAmt'] = df['ActAmt'].fillna(0)
 

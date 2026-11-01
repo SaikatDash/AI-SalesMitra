@@ -284,33 +284,41 @@ answer = rag.query("Which products had highest sales in Q3?")
 git clone <repo-url>
 cd AI-SalesMitra
 
-# 2. Create virtual environment
+# 2. Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate for both frontend and backend folders
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 3. Upgrade pip
 pip install --upgrade pip
 
-# 4. Install dependencies
-pip install -r requirements.txt for both folder
+# 4. Install backend and frontend dependencies
+pip install -r backend/requirements.txt
+pip install -r frontend/requirements.txt
 
 # 5. Backend running (local)
 python -m uvicorn backend.main:app --reload
 
 # 6. Run the frontend (local)
-python -m streamlit run frontend/sales_app.py
+python -m streamlit run frontend/sample.py
 
 # 7. If login is not working, register a new account from the home page.
 ```
 
 ### Environment Variables
-For local development, create `backend/.env` and keep it out of Git:
+For local development, copy `.env.example` to the repository root as `.env` and add your own values. Keep `.env` out of Git:
 ```env
 DATABASE_URL=<local-or-hosted-postgresql-url>
 GOOGLE_API_KEY=<your-google-api-key>
+GEMINI_API_KEY=<your-gemini-api-key>
+GEMINI_MODEL=gemini-3.8-flash
+SESSION_SECRET=<random-secret-used-to-sign-login-sessions>
 HOST=0.0.0.0
 PORT=8000
 ```
+
+The signed-in dashboard at `frontend/sample.py` accepts CSV, XLS, XLSX/XLSM, and PDF uploads up to 15 MB from the sidebar. CSV and Excel columns are used to create one SQL table per unique user upload; exact repeat uploads reuse the existing dataset table. PDF table extraction and generated dataset insights use Gemini. Set `GEMINI_API_KEY` (or the existing `GOOGLE_API_KEY`) in the backend environment (not the Streamlit frontend) to enable Gemini analysis and platform-help answers. Excel parsing requires the backend requirements to be installed.
+
+If Google reports that a Gemini key has been leaked, revoke it and generate a replacement. Use the replacement in the local `.env`; for Render, set it in the backend service's environment settings and redeploy the backend. Do not commit or bake `.env` into a container image.
 ---
 
 ## 📜 License

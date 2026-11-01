@@ -1,3 +1,4 @@
+/.env
 backend/.env
 venv/Include/site/python3.12/greenlet/greenlet.h
 venv/Lib/site-packages/81d243bd2c585b0f4821__mypyc.cp312-win_amd64.pyd
@@ -19994,3 +19995,4 @@ venv/Lib/site-packages/SQLAlchemy-2.0.23.dist-info/RECORD
 venv/Lib/site-packages/SQLAlchemy-2.0.23.dist-info/REQUESTED
 venv/Lib/site-packages/SQLAlchemy-2.0.23.dist-info/top_level.txt
 venv/Lib/site-packages/SQLAlchemy-2.0.23.dist-info/WHEEL
+backend/.env

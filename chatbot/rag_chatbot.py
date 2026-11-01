@@ -7,6 +7,11 @@ from typing import Any, Dict, List
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+try:
+    from backend.upload_service import gemini_rag_answer
+except ImportError:
+    gemini_rag_answer = None
+
 
 class SalesMitraChatbot:
     """Lightweight local RAG helper for sales questions and app navigation."""
@@ -19,9 +24,9 @@ class SalesMitraChatbot:
                 "title": "Load CSV data",
                 "route": "CSV Import",
                 "content": (
-                    "To load medicine sales data, open a terminal in the project, run cd csv, "
-                    "then run python main.py. The importer reads Mfg_Sales.csv and stores new rows "
-                    "in the sales_data table."
+                    "Sign in, open the Dashboard, and use Upload sales data to import CSV, XLS, XLSX/XLSM, or PDF. "
+                    "CSV and Excel column names become a user-owned SQL table; an exact repeat upload reuses "
+                    "the existing dataset. PDF table extraction requires the backend Gemini API key."
                 ),
             },
             {
@@ -284,14 +289,21 @@ class SalesMitraChatbot:
         return [doc for _, doc in scored[:limit]]
 
     def _compose_rag_answer(self, query: str, docs: List[Dict[str, str]]) -> str:
+        if gemini_rag_answer:
+            try:
+                return gemini_rag_answer(query, docs)
+            except Exception as exc:
+                provider_detail = getattr(exc, "detail", None)
+                unavailable = str(provider_detail) if provider_detail else "Gemini AI is unavailable right now."
+                points = [f"- {doc['title']}: {doc['content']}" for doc in docs[:3]]
+                return unavailable + "\n\nHere is the matching platform guidance:\n" + "\n".join(points)
         points = [f"- {doc['title']}: {doc['content']}" for doc in docs[:3]]
-        return "Based on the project knowledge I found:\n" + "\n".join(points)
+        return "Gemini AI is unavailable right now. Here is the matching platform guidance:\n" + "\n".join(points)
 
     def _navigation_answer(self, query: str) -> Dict[str, Any]:
         docs = self._retrieve(query)
-        steps = [f"{index}. {doc['content']}" for index, doc in enumerate(docs, start=1)]
         return {
-            "answer": "Here is the best path:\n" + "\n".join(steps),
+            "answer": self._compose_rag_answer(query, docs),
             "intent": "navigation",
             "sources": [doc["title"] for doc in docs],
             "navigation": [{"label": doc["route"], "detail": doc["content"]} for doc in docs],
@@ -310,9 +322,8 @@ class SalesMitraChatbot:
             "ARIMA forecast option",
         }
         docs = [doc for doc in self.knowledge_base if doc["title"] in option_titles]
-        lines = [f"- {doc['route']}: {doc['content']}" for doc in docs]
         return {
-            "answer": "Here is how each dashboard option works:\n" + "\n".join(lines),
+            "answer": self._compose_rag_answer("Explain every dashboard option", docs),
             "intent": "all_options_help",
             "sources": [doc["title"] for doc in docs],
             "navigation": [{"label": doc["route"], "detail": doc["content"]} for doc in docs],
@@ -331,8 +342,12 @@ class SalesMitraChatbot:
             "How do I export a report?",
             "How do I load CSV data or start the backend?",
         ]
+        docs = [doc for doc in self.knowledge_base if doc["title"] == "Suggested chatbot questions"]
+        answer = self._compose_rag_answer("What can you help me with?", docs)
+        if answer.startswith("Gemini AI is unavailable right now."):
+            answer = "You can ask me questions like:\n" + "\n".join(f"- {question}" for question in questions)
         return {
-            "answer": "You can ask me questions like:\n" + "\n".join(f"- {question}" for question in questions),
+            "answer": answer,
             "intent": "question_guide",
             "sources": ["Suggested chatbot questions"],
             "navigation": [

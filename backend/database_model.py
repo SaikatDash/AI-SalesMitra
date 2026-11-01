@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, Date
+from sqlalchemy import Column, Integer, String, DateTime, Float, Date, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from pydantic import BaseModel
 from datetime import datetime
@@ -38,6 +38,21 @@ class SalesData(Base):
     cn_amt = Column(Float, nullable=True)
     act_qty = Column(Float, nullable=True)
     act_amt = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UploadedDataset(Base):
+    """Registry entry for a user's uploaded, dynamically shaped dataset."""
+    __tablename__ = "uploaded_datasets"
+    __table_args__ = (UniqueConstraint("user_id", "content_hash", name="uq_user_dataset_hash"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_name = Column(String(255), nullable=False)
+    table_name = Column(String(63), nullable=False, unique=True)
+    content_hash = Column(String(64), nullable=False)
+    columns_json = Column(Text, nullable=False)
+    row_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

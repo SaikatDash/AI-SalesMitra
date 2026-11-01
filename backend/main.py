@@ -1,15 +1,21 @@
 from datetime import datetime
 from pathlib import Path
 import sys
+import hashlib
+import hmac
+import os
+import time
+import pandas as pd
+from typing import Any
 from typing import Generator, List, Optional
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from backend.database import SessionLocal, engine, get_database_info
-from backend.database_model import Base, User, SalesData
+from backend.database_model import Base, User, SalesData, UploadedDataset
 from backend.model import (
     UserRegister,
     UserLogin,
@@ -24,6 +30,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from chatbot.rag_chatbot import SalesMitraChatbot, product_location_cluster_analysis
+from backend.upload_service import MAX_UPLOAD_BYTES, _json_value, dataset_frame, dataset_summary, gemini_dataset_insight, parse_upload, save_dataset
 
 app = FastAPI(title="AISalesMitra:You Personal Sales Assistant API", version="1.0.0")
 app.state.database_startup_error = None
@@ -73,6 +80,40 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 class ChatbotQuery(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
+    dataset_id: Optional[int] = None
+
+
+_LOCAL_SESSION_SECRET = os.urandom(32)
+
+
+def _session_secret() -> bytes:
+    configured = os.getenv("SESSION_SECRET")
+    return configured.encode("utf-8") if configured else _LOCAL_SESSION_SECRET
+
+
+def _issue_session_token(user_id: int) -> str:
+    expires = int(time.time()) + 60 * 60 * 24 * 7
+    payload = f"{user_id}.{expires}"
+    signature = hmac.new(_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def get_current_user(authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)) -> User:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Sign in to access uploaded datasets.")
+    try:
+        user_id_text, expires_text, signature = authorization.removeprefix("Bearer ").split(".")
+        payload = f"{user_id_text}.{expires_text}"
+        expected = hmac.new(_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected) or int(expires_text) < int(time.time()):
+            raise ValueError("invalid session")
+        user_id = int(user_id_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.") from exc
+    user = db.query(User).filter(User.id == user_id, User.is_active == 1).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="This account is unavailable. Please sign in again.")
+    return user
 
 
 @app.get("/")
@@ -160,7 +201,67 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     user.last_login = datetime.utcnow()
     db.commit()
     db.refresh(user)
-    return loginresponse.model_validate(user)
+    return {**loginresponse.model_validate(user).model_dump(mode="json"), "access_token": _issue_session_token(user.id)}
+
+
+@app.post("/api/datasets/upload")
+async def upload_dataset(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Upload limit is 15 MB.")
+    digest = hashlib.sha256(content).hexdigest()
+    dataset = db.query(UploadedDataset).filter_by(user_id=user.id, content_hash=digest).first()
+    if dataset:
+        frame = dataset_frame(db, dataset)
+        created = False
+    else:
+        frame = parse_upload(file.filename or "upload", content)
+        dataset, created = save_dataset(db, user.id, file.filename or "upload", content, frame)
+    try:
+        insight = gemini_dataset_insight(frame)
+    except HTTPException as exc:
+        insight = f"The dataset was saved, but Gemini analysis could not finish: {exc.detail}"
+    return {
+        "id": dataset.id,
+        "name": dataset.source_name,
+        "row_count": dataset.row_count,
+        "columns": [item["original"] for item in __import__("json").loads(dataset.columns_json)],
+        "created": created,
+        "summary": dataset_summary(frame),
+        "insight": insight,
+    }
+
+
+@app.get("/api/datasets")
+def list_datasets(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    datasets = db.query(UploadedDataset).filter_by(user_id=user.id).order_by(UploadedDataset.created_at.desc()).all()
+    import json
+    return [{"id": item.id, "name": item.source_name, "row_count": item.row_count,
+             "columns": [column["original"] for column in json.loads(item.columns_json)],
+             "created_at": item.created_at.isoformat() if item.created_at else None} for item in datasets]
+
+
+@app.get("/api/datasets/{dataset_id}/rows")
+def get_dataset_rows(dataset_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    dataset = db.query(UploadedDataset).filter_by(id=dataset_id, user_id=user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    frame = dataset_frame(db, dataset)
+    return [{str(column): _json_value(value) for column, value in row.items()}
+            for row in frame.to_dict(orient="records")]
+
+
+@app.post("/api/datasets/{dataset_id}/analyze")
+def analyze_dataset(dataset_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    dataset = db.query(UploadedDataset).filter_by(id=dataset_id, user_id=user.id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    frame = dataset_frame(db, dataset)
+    return {"summary": dataset_summary(frame), "insight": gemini_dataset_insight(frame)}
 
 
 # Sales Data Endpoints
