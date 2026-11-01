@@ -1,7 +1,15 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import sessionmaker
+
+# Keep local credentials in backend/.env (or the repository-level .env) while
+# allowing deployment-provided environment variables to take precedence.
+_BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(_BACKEND_DIR / ".env", override=False)
+load_dotenv(_BACKEND_DIR.parent / ".env", override=False)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -13,7 +21,7 @@ if not DATABASE_URL:
         )
 
     # Local default. Docker Compose overrides this with db:5432.
-    DATABASE_URL = "postgresql://postgres:sys449420@localhost:5432/salesmitra"
+    DATABASE_URL = "postgresql://salesmitra_user:SQZe1WzlRsRIPzdof8leFENUuRJGB2Lu@dpg-dbfg3b8ae00c73fvb2e0-a.oregon-postgres.render.com/salesmitra"
 
 # SQLite needs connect_args; other DBs do not
 connect_args = {}
