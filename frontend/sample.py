@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import os
 import warnings
+import base64
 from io import BytesIO
 
 warnings.filterwarnings("ignore")
@@ -51,6 +52,152 @@ section[data-testid="stSidebar"] [role="radiogroup"] label{
 section[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
     background:#484954;
 }
+
+/* Give Streamlit's native widgets a polished, component-like treatment. */
+.main .block-container{
+    max-width:1500px;
+    padding-top:2rem;
+    padding-bottom:3rem;
+}
+.main h1,.main h2,.main h3{
+    letter-spacing:-.035em;
+    font-weight:720;
+}
+.main h1{font-size:2.25rem;}
+div[data-testid="stVerticalBlockBorderWrapper"]{
+    border:1px solid rgba(126,145,180,.24) !important;
+    border-radius:18px !important;
+    background:linear-gradient(145deg,rgba(99,102,241,.09),rgba(14,165,233,.035)) !important;
+    box-shadow:0 10px 30px rgba(15,23,42,.10);
+    transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:hover{
+    transform:translateY(-2px);
+    border-color:rgba(99,102,241,.48) !important;
+    box-shadow:0 14px 34px rgba(15,23,42,.17);
+}
+div[data-testid="stMetric"]{
+    padding:1rem 1.05rem;
+    border:1px solid rgba(126,145,180,.22);
+    border-radius:16px;
+    background:linear-gradient(145deg,rgba(99,102,241,.10),rgba(14,165,233,.04));
+}
+div[data-testid="stMetricLabel"] p{font-weight:600;}
+div[data-testid="stButton"] > button,
+div[data-testid="stDownloadButton"] > button,
+div[data-testid="stFormSubmitButton"] > button{
+    min-height:2.65rem;
+    border-radius:12px;
+    font-weight:650;
+    transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;
+}
+div[data-testid="stButton"] > button:hover,
+div[data-testid="stDownloadButton"] > button:hover,
+div[data-testid="stFormSubmitButton"] > button:hover{
+    transform:translateY(-1px);
+    border-color:rgba(99,102,241,.7);
+    box-shadow:0 7px 18px rgba(79,70,229,.18);
+}
+div[data-testid="stButton"] > button[kind="primary"],
+div[data-testid="stFormSubmitButton"] > button[kind="primary"]{
+    border:0;
+    background:linear-gradient(110deg,#4f46e5,#0ea5e9);
+    color:#fff;
+}
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+div[data-testid="stTextInput"] [data-baseweb="input"]{
+    border-radius:11px;
+}
+section[data-testid="stSidebar"] [role="radiogroup"] label{
+    transition:background .16s ease,transform .16s ease;
+}
+section[data-testid="stSidebar"] [role="radiogroup"] label:hover{
+    background:rgba(129,140,248,.14);
+}
+section[data-testid="stSidebar"] [role="radiogroup"] input[type="radio"]{
+    display:none;
+}
+section[data-testid="stSidebar"] [role="radiogroup"] label{
+    padding:.6rem .75rem;
+    border:1px solid transparent;
+    border-radius:12px;
+}
+section[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
+    border-color:rgba(129,140,248,.35);
+    background:linear-gradient(100deg,rgba(99,102,241,.26),rgba(14,165,233,.12));
+}
+div[data-testid="stPopover"]{
+    position:fixed !important;
+    right:24px !important;
+    bottom:22px !important;
+    z-index:99999 !important;
+    width:56px !important;
+    min-width:56px !important;
+    max-width:56px !important;
+}
+div[data-testid="stPopover"] [data-testid="stPopoverButton"]{
+    box-sizing:border-box !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    width:56px !important;
+    height:56px !important;
+    min-width:56px !important;
+    max-width:56px !important;
+    padding:0 !important;
+    border:3px solid rgba(255,255,255,.88) !important;
+    border-radius:50% !important;
+    background:linear-gradient(145deg,#22c55e,#15803d) !important;
+    box-shadow:0 8px 26px rgba(15,23,42,.3),0 0 0 5px rgba(34,197,94,.16);
+    color:white !important;
+}
+div[data-testid="stPopover"] [data-testid="stPopoverButton"]:hover{
+    transform:scale(1.06);
+    box-shadow:none !important;
+}
+div[data-testid="stPopoverBody"]{
+    width:min(390px,calc(100vw - 32px)) !important;
+    max-height:72vh !important;
+    overflow-y:auto !important;
+    border:1px solid rgba(126,145,180,.3) !important;
+    border-radius:20px !important;
+    box-shadow:0 18px 55px rgba(15,23,42,.3) !important;
+}
+.salesmitra-chat-teaser{
+    position:fixed;
+    right:98px;
+    bottom:34px;
+    z-index:99998;
+    display:flex;
+    align-items:center;
+    gap:.65rem;
+    padding:.85rem 1rem;
+    border:1px solid rgba(126,145,180,.24);
+    border-radius:16px;
+    background:var(--background-color);
+    box-shadow:0 8px 26px rgba(15,23,42,.2);
+    color:var(--text-color);
+    font-weight:650;
+    white-space:nowrap;
+}
+.salesmitra-chat-teaser:after{
+    content:"";
+    position:absolute;
+    right:-7px;
+    width:13px;
+    height:13px;
+    transform:rotate(45deg);
+    border-top:1px solid rgba(126,145,180,.24);
+    border-right:1px solid rgba(126,145,180,.24);
+    background:var(--background-color);
+}
+.salesmitra-chat-status{
+    width:10px;
+    height:10px;
+    border-radius:50%;
+    background:#22c55e;
+    box-shadow:0 0 0 4px rgba(34,197,94,.14);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -72,7 +219,23 @@ def get_api_url():
     return "https://ai-salesmitra-dnxg.onrender.com"
 
 API_BASE_URL = get_api_url()
-API_TIMEOUT = (10, 120)  # Render instances can take a while to wake from idle.
+API_TIMEOUT = (10, 180)  # Includes cold starts and slower Gemini-backed operations.
+CHAT_TIMEOUT = (10, 240)
+
+SUGGESTED_HELP_QUESTIONS = [
+    "How do I upload a sales file, and which formats are supported?",
+    "What does each dashboard and analytics option do?",
+    "How do I fix missing or invalid values in my uploaded data?",
+    "How can I compare sales by product, branch, or region?",
+    "How do I read the sales forecast and its error metrics?",
+    "What does the product cluster analysis show?",
+    "How do I download or export my analysis?",
+    "Why was my repeated upload reused instead of saved again?",
+    "How do I manage my account and sign out?",
+    "What should I do if Gemini or the backend is unavailable?",
+    "Can you explain this chart or screenshot?",
+    "What should I check when an upload fails?",
+]
 
 def backend_available():
     try:
@@ -147,18 +310,36 @@ def logout():
 # ======================================================
 # DATA & AI FUNCTIONS
 # ======================================================
-def ask_chatbot(question):
+def ask_chatbot(question, image=None):
+    payload = {"query": question}
+    if image is not None:
+        payload.update({
+            "image_data": base64.b64encode(image.getvalue()).decode("ascii"),
+            "image_mime_type": image.type or "image/png",
+        })
     try:
         response = requests.post(
             f"{API_BASE_URL}/api/chatbot/query",
-            json={"query": question},
-            timeout=60,
+            json=payload,
+            timeout=CHAT_TIMEOUT,
         )
         if response.status_code == 200:
-            return response.json()
-        return {"answer": "Chatbot returned an error."}
-    except Exception as e:
-        return {"answer": str(e)}
+            result = response.json()
+            if not isinstance(result, dict):
+                return {"answer": "The AI service returned an unexpected response. Please retry."}
+            answer = result.get("answer")
+            if not isinstance(answer, str) or not answer.strip():
+                result["answer"] = "I received your question, but the AI service returned an empty reply. Check the backend Gemini key and logs, then retry."
+            elif answer.strip().casefold() == question.strip().casefold():
+                result["answer"] = "I received your question, but the AI service returned it unchanged. Check that the deployed backend has a valid GEMINI_API_KEY and retry."
+            return result
+        return {"answer": response_detail(response, "The assistant could not answer that request.")}
+    except requests.Timeout:
+        return {"answer": "The AI request took too long to finish. Try a shorter question or a smaller image, then retry."}
+    except requests.RequestException as exc:
+        return {"answer": f"Could not reach the AI assistant: {exc}"}
+    except (ValueError, TypeError) as exc:
+        return {"answer": f"The AI service returned an unreadable response ({type(exc).__name__}). Please retry."}
 
 def load_sales():
     try:
@@ -210,7 +391,7 @@ def load_datasets():
         return []
 
 
-def render_uploaded_dataset(dataset):
+def render_uploaded_dataset(dataset, *, include_advanced=False):
     """Show useful analytics for arbitrary uploaded table columns."""
     df = load_sales()
     if df.empty:
@@ -224,6 +405,7 @@ def render_uploaded_dataset(dataset):
     quantity = next((normalized[name] for name in normalized if any(term in name for term in ("qty", "quantity", "units")) and pd.to_numeric(df[normalized[name]], errors="coerce").notna().any()), None)
     dimensions = [column for column in df.columns if column not in (amount, quantity) and df[column].nunique(dropna=True) <= 100]
     st.caption(f"{dataset['name']} · {len(df):,} records · {len(df.columns)} columns")
+    render_data_quality_report(df)
     if amount:
         values = pd.to_numeric(df[amount], errors="coerce")
         a, b, c = st.columns(3)
@@ -237,43 +419,229 @@ def render_uploaded_dataset(dataset):
         chart_df = df.assign(_amount=pd.to_numeric(df[amount], errors="coerce")).groupby(dimension, dropna=False)["_amount"].sum().sort_values(ascending=False).head(20).reset_index()
         chart_df[dimension] = chart_df[dimension].astype(str)
         st.plotly_chart(px.bar(chart_df, x=dimension, y="_amount", title=f"{amount} by {dimension}"), width="stretch")
+    if include_advanced:
+        st.divider()
+        render_uploaded_arima_forecast(df)
+        st.divider()
+        render_uploaded_cluster_analysis(df)
     st.subheader("Uploaded data")
     st.dataframe(df, width="stretch", height=360)
 
 
-def render_dataset_upload():
-    st.sidebar.markdown("### 📤 Upload sales data")
-    st.sidebar.caption("CSV, Excel, or PDF · up to 15 MB")
-    with st.sidebar.form("sales_dataset_upload", clear_on_submit=True):
-        uploaded = st.file_uploader("Choose a sales file", type=["csv", "xls", "xlsx", "xlsm", "pdf"], key="sidebar_sales_upload")
-        submitted = st.form_submit_button("Upload and analyze", use_container_width=True)
+def render_data_quality_report(df):
+    """Show actionable, non-blocking checks for common sales-file problems."""
+    issues = []
+    missing = df.isna() | df.astype("string").apply(lambda column: column.str.strip().eq(""))
+    for column, count in missing.sum().items():
+        if count:
+            issues.append((
+                f"{column}: {int(count):,} blank value(s)",
+                "Fill the missing cells if the value is known, or leave them blank if unknown. For sales or quantity fields, check that blanks are intentional before relying on totals.",
+            ))
+
+    duplicate_count = int(df.duplicated().sum())
+    if duplicate_count:
+        issues.append((
+            f"{duplicate_count:,} exact duplicate row(s)",
+            "Review the repeated rows against the source file. Remove them if they are accidental; keep them if each row is a valid separate transaction.",
+        ))
+
+    numeric_terms = ("sales", "revenue", "amount", "price", "profit", "cost", "qty", "quantity", "units")
+    for column in df.columns:
+        if not any(term in str(column).casefold() for term in numeric_terms):
+            continue
+        source = df[column].astype("string").str.strip()
+        present = source.notna() & source.ne("")
+        cleaned = source.str.replace(r"[,₹$€£]", "", regex=True)
+        parsed = pd.to_numeric(cleaned, errors="coerce")
+        invalid = present & parsed.isna()
+        count = int(invalid.sum())
+        if count:
+            examples = ", ".join(repr(value) for value in source[invalid].dropna().astype(str).unique()[:3])
+            issues.append((
+                f"{column}: {count:,} value(s) are not numeric (examples: {examples})",
+                "Use plain numbers in this column. Remove words, units, or unexpected symbols; keep currency symbols and thousands separators consistent. Values like 'N/A' should be blank or corrected to a number.",
+            ))
+
+    with st.expander(f"Data quality checks · {len(issues)} item(s)", expanded=bool(issues)):
+        if not issues:
+            st.success("No missing cells, exact duplicate rows, or invalid values in sales-like numeric columns were found.")
+            return
+        st.caption("These checks do not change your uploaded data. Review each item and re-upload a corrected file if needed.")
+        for issue, fix in issues:
+            st.markdown(f"**{issue}**")
+            st.caption(f"How to fix: {fix}")
+
+
+def _numeric_series(values):
+    cleaned = values.astype("string").str.replace(r"[,₹$€£]", "", regex=True)
+    return pd.to_numeric(cleaned, errors="coerce")
+
+
+def render_uploaded_arima_forecast(df):
+    """Fit an ARIMA forecast when the uploaded table has dates and a numeric measure."""
+    st.subheader("🔮 ARIMA sales forecast")
+    date_terms = ("date", "time", "month", "period", "mmyyyy")
+    date_column = next(
+        (column for column in df.columns if any(term in str(column).casefold() for term in date_terms)),
+        None,
+    )
+    metric_terms = ("sales", "revenue", "amount", "turnover", "total", "price", "profit", "quantity", "qty", "units")
+    metric_column = next(
+        (column for column in df.columns
+         if any(term in str(column).casefold() for term in metric_terms)
+         and _numeric_series(df[column]).notna().sum() >= 3),
+        None,
+    )
+    if date_column is None or metric_column is None:
+        missing = []
+        if date_column is None:
+            missing.append("a date/order date column")
+        if metric_column is None:
+            missing.append("a numeric sales, revenue, amount, or quantity column")
+        st.info("ARIMA needs " + " and ".join(missing) + ". Add those columns to the uploaded file to enable forecasting.")
+        return
+
+    dated_values = pd.to_datetime(df[date_column], errors="coerce")
+    amount_values = _numeric_series(df[metric_column])
+    dated = pd.DataFrame({"date": dated_values, "value": amount_values}).dropna()
+    if dated.empty:
+        st.info(f"No usable date and numeric value pairs were found in '{date_column}' and '{metric_column}'. Correct those columns and upload the file again.")
+        return
+
+    dated["month"] = dated["date"].dt.to_period("M").dt.to_timestamp()
+    monthly = dated.groupby("month")["value"].sum().sort_index().asfreq("MS", fill_value=0)
+    if len(monthly) < 8:
+        st.info(f"ARIMA needs at least 8 months of history; this file has {len(monthly)} usable month(s). Upload a longer date range to forecast.")
+        return
+    if monthly.nunique() < 2:
+        st.info("The sales measure is constant over time, so an ARIMA forecast would not be meaningful.")
+        return
+
+    try:
+        from statsmodels.tsa.arima.model import ARIMA
+
+        order = (1, 1, 1) if len(monthly) >= 18 else (1, 1, 0)
+        fitted = ARIMA(
+            monthly.astype(float),
+            order=order,
+            enforce_stationarity=False,
+            enforce_invertibility=False,
+        ).fit()
+        prediction = fitted.get_forecast(steps=6)
+        forecast_values = prediction.predicted_mean
+        intervals = prediction.conf_int()
+        forecast = pd.DataFrame({
+            "month": forecast_values.index,
+            "value": forecast_values.values,
+            "lower": intervals.iloc[:, 0].values,
+            "upper": intervals.iloc[:, 1].values,
+            "series": "Forecast",
+        })
+        history = pd.DataFrame({"month": monthly.index, "value": monthly.values, "series": "Historical"})
+        first, second = st.columns(2)
+        first.metric("History", f"{len(monthly)} months")
+        second.metric("Next 6 months forecast", f"{forecast['value'].sum():,.2f}")
+        chart = pd.concat([history, forecast[["month", "value", "series"]]], ignore_index=True)
+        fig = px.line(chart, x="month", y="value", color="series", markers=True,
+                      title=f"Monthly {metric_column}: actuals and ARIMA forecast")
+        fig.update_layout(xaxis_title="Month", yaxis_title=str(metric_column), legend_title="")
+        st.plotly_chart(fig, width="stretch")
+        with st.expander("Forecast values and confidence range"):
+            st.dataframe(
+                forecast.rename(columns={"month": "Month", "value": "Forecast", "lower": "Lower range", "upper": "Upper range"}),
+                hide_index=True,
+                width="stretch",
+            )
+    except Exception as exc:
+        st.warning(f"ARIMA could not fit this series ({type(exc).__name__}). Check that the date and sales values are valid and try again.")
+
+
+def render_uploaded_cluster_analysis(df):
+    """Cluster uploaded rows with K-means, leaving ID-like columns out of the model."""
+    st.subheader("🧩 Product and order clusters")
+    identifier_terms = ("id", "code", "phone", "postal", "zip")
+    features = {}
+    for column in df.columns:
+        name = str(column).casefold()
+        if any(term in name for term in identifier_terms):
+            continue
+        values = _numeric_series(df[column])
+        if values.notna().sum() >= 3 and values.nunique(dropna=True) > 1:
+            features[column] = values
+
+    if not features:
+        st.info("Clustering needs at least one varying numeric measure, such as sales, order value, quantity, or profit. Add a numeric measure column to this file.")
+        return
+
+    try:
+        from sklearn.cluster import KMeans
+        from sklearn.preprocessing import StandardScaler
+
+        measures = pd.DataFrame(features).replace([float("inf"), float("-inf")], float("nan"))
+        measures = measures.dropna(how="all").fillna(measures.median(numeric_only=True))
+        cluster_count = min(3, len(measures.drop_duplicates()))
+        if cluster_count < 2:
+            st.info("These numeric measures do not contain enough distinct values to form meaningful clusters.")
+            return
+        labels = KMeans(n_clusters=cluster_count, random_state=42, n_init=10).fit_predict(StandardScaler().fit_transform(measures))
+        clustered = measures.copy()
+        clustered["Cluster"] = [f"Cluster {label + 1}" for label in labels]
+        summary = clustered.groupby("Cluster", as_index=False).size().rename(columns={"size": "Records"})
+        averages = clustered.groupby("Cluster", as_index=False)[list(features)].mean()
+        summary = summary.merge(averages, on="Cluster")
+        st.caption(f"K-means grouped {len(clustered):,} rows using {len(features)} numeric measure(s). Identifier columns were excluded.")
+        chart_columns = list(features)
+        if len(chart_columns) >= 2:
+            fig = px.scatter(clustered, x=chart_columns[0], y=chart_columns[1], color="Cluster",
+                             title=f"Clusters by {chart_columns[0]} and {chart_columns[1]}", opacity=0.72)
+        else:
+            fig = px.box(clustered, x="Cluster", y=chart_columns[0], color="Cluster",
+                         title=f"{chart_columns[0]} by cluster")
+        st.plotly_chart(fig, width="stretch")
+        with st.expander("Cluster averages and row counts"):
+            st.dataframe(summary, hide_index=True, width="stretch")
+    except Exception as exc:
+        st.warning(f"Clustering could not run on these values ({type(exc).__name__}). Review the numeric columns in the data checks above.")
+
+
+def render_dataset_upload(container=None, key_prefix="sidebar"):
+    target = container if container is not None else st.sidebar
+    target.caption("CSV, Excel, or PDF · up to 15 MB")
+    with target.form(f"{key_prefix}_sales_dataset_upload", clear_on_submit=True):
+        uploaded = st.file_uploader(
+            "Choose a sales file",
+            type=["csv", "xls", "xlsx", "xlsm", "pdf"],
+            key=f"{key_prefix}_sales_upload",
+        )
+        submitted = st.form_submit_button("Upload and analyze", width="stretch")
     if submitted:
         if not uploaded:
-            st.sidebar.warning("Choose a file first.")
+            target.warning("Choose a file first.")
         else:
             try:
                 response = requests.post(
                     f"{API_BASE_URL}/api/datasets/upload",
                     headers=dataset_headers(),
                     files={"file": (uploaded.name, uploaded.getvalue(), uploaded.type or "application/octet-stream")},
-                    timeout=180,
+                    timeout=(10, 240),
                 )
                 if response.status_code == 200:
                     try:
                         result = response.json()
                     except ValueError:
-                        st.sidebar.error("The backend returned an unreadable response. Please try again.")
+                        target.error("The backend returned an unreadable response. Please try again.")
                         return
                     if not isinstance(result, dict) or "id" not in result:
-                        st.sidebar.error("The backend returned an incomplete upload result. Please try again.")
+                        target.error("The backend returned an incomplete upload result. Please try again.")
                         return
                     st.session_state.active_dataset_id = result["id"]
                     st.session_state.last_upload_result = result
                     st.rerun()
                 else:
-                    st.sidebar.error(upload_error_message(response))
+                    target.error(upload_error_message(response))
             except requests.RequestException as exc:
-                st.sidebar.error(f"Upload failed: {exc}")
+                target.error(f"Upload failed: {exc}")
 
 
 def render_upload_result():
@@ -363,30 +731,63 @@ def render_auth():
                 st.rerun()
 
 def render_dashboard():
-    st.title("📊 Sales Dashboard")
-    st.caption("AI Powered Medicine Sales Analytics")
-    
-    st.markdown(f"""
-    <div style="padding:15px; border-radius:10px; background:linear-gradient(135deg,#2563eb,#7c3aed); color:white; margin-bottom:20px;">
-    <h3>Welcome back 👋, {st.session_state.user_email}</h3>
-    </div>
-    """, unsafe_allow_html=True)
+    email = st.session_state.get("user_email", "")
+    display_name = st.session_state.get("user_name") or email.split("@", 1)[0] or "there"
+    with st.container(border=True):
+        st.caption("YOUR AI SALES WORKSPACE")
+        st.title(f"Welcome to SalesMitra, {display_name} 👋")
+        st.markdown(
+            "Turn sales files into clear summaries, charts, comparisons, and forecasts. "
+            "Spot changes sooner and spend less time cleaning spreadsheets or building reports by hand."
+        )
+    with st.container(border=True):
+        st.markdown("### 🚀 Get started")
+        st.write("Upload a sales file to create a saved analysis with summaries, charts, and data checks.")
+        render_dataset_upload(container=st.container(), key_prefix="dashboard")
+    purpose_columns = st.columns(3)
+    purpose_cards = [
+        ("📊  Understand performance", "See key sales, quantity, and product metrics at a glance."),
+        ("🔎  Find useful patterns", "Compare products, branches, and regions to see what is changing."),
+        ("⚡  Save time", "Upload a file once, reopen saved analyses, and get a head start on reporting."),
+    ]
+    for column, (title, description) in zip(purpose_columns, purpose_cards):
+        with column:
+            with st.container(border=True):
+                st.markdown(f"**{title}**")
+                st.caption(description)
 
     datasets = load_datasets()
     if datasets:
         by_id = {item["id"]: item for item in datasets}
         if st.session_state.get("active_dataset_id") not in by_id:
             st.session_state.active_dataset_id = datasets[0]["id"]
+        st.subheader("Your previous analyses")
+        st.caption("Your uploads are saved to your account. Choose one to reopen its charts, summary, and data checks.")
+        history = pd.DataFrame([
+            {
+                "File": item.get("name", "Uploaded dataset"),
+                "Uploaded": (item.get("created_at") or "").replace("T", " ")[:16] or "Date unavailable",
+                "Rows": item.get("row_count", 0),
+                "Columns": len(item.get("columns", [])),
+            }
+            for item in datasets[:10]
+        ])
+        st.dataframe(history, hide_index=True, width="stretch")
         selected_id = st.selectbox(
-            "Active dataset",
+            "Open a saved analysis",
             options=list(by_id),
-            format_func=lambda dataset_id: f"{by_id[dataset_id]['name']} ({by_id[dataset_id]['row_count']:,} rows)",
+            format_func=lambda dataset_id: (
+                f"{by_id[dataset_id].get('name', 'Uploaded dataset')} "
+                f"({by_id[dataset_id].get('row_count', 0):,} rows)"
+            ),
             index=list(by_id).index(st.session_state.active_dataset_id),
             key="active_dataset_selector",
         )
         st.session_state.active_dataset_id = selected_id
         render_uploaded_dataset(by_id[selected_id])
         return
+
+    st.info("Start by uploading a CSV, Excel, or PDF sales file in the sidebar. Your analysis will appear here and be saved to your account for next time.")
 
     summary = load_summary()
     col1, col2, col3, col4 = st.columns(4)
@@ -441,7 +842,7 @@ def render_analytics():
     uploaded_sets = load_datasets()
     active = next((item for item in uploaded_sets if item["id"] == st.session_state.get("active_dataset_id")), None)
     if active:
-        render_uploaded_dataset(active)
+        render_uploaded_dataset(active, include_advanced=True)
         return
     df = load_sales()
 
@@ -485,6 +886,9 @@ def render_analytics():
             st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
+    render_uploaded_arima_forecast(df)
+
+    st.divider()
     st.subheader("🧠 Product Location Cluster Analysis")
     clusters = load_clusters()
     if clusters:
@@ -517,39 +921,55 @@ def render_analytics():
             else:
                 st.info("Cluster results are missing the fields needed for this chart.")
     else:
-        st.info("No cluster analysis available.")
+        st.info("The saved-sales clustering service returned no cluster records. Showing local clusters from the available numeric sales data instead.")
+        render_uploaded_cluster_analysis(df)
 
-def render_chatbot():
-    st.title("🤖 SalesMitra AI Assistant")
-    st.caption("Ask anything about Sales, Products, Forecasting or Navigation.")
-
-    col1, col2 = st.columns([5, 1])
-    with col2:
-        if st.button("🗑 Clear Chat", use_container_width=True):
+def render_shared_assistant():
+    """Render the fixed bottom-right assistant launcher on signed-in pages."""
+    st.markdown(
+        '<div class="salesmitra-chat-teaser"><span class="salesmitra-chat-status"></span>How may I help you?</div>',
+        unsafe_allow_html=True,
+    )
+    with st.popover("💬", type="primary", help="Ask SalesMitra AI", width="content", key="salesmitra_help_launcher"):
+        st.markdown("### SalesMitra help")
+        st.caption("Ask about the platform or attach a screenshot of a chart or error.")
+        for chat in st.session_state.chat_history[-8:]:
+            with st.chat_message(chat["role"]):
+                st.markdown(chat["content"])
+        if not st.session_state.chat_history:
+            st.info("Try: How do I upload data? · What does this chart mean? · How can I fix my file?")
+        if st.button("Clear conversation", key="clear_floating_chat"):
             st.session_state.chat_history = []
             st.rerun()
+        with st.form("floating_chat_form", clear_on_submit=True):
+            question = st.text_input("Your question", placeholder="Ask SalesMitra…", key="floating_chat_question")
+            image = st.file_uploader(
+                "Attach a screenshot (optional)",
+                type=["png", "jpg", "jpeg", "webp"],
+                key="floating_chat_image",
+            )
+            submitted = st.form_submit_button("Send to SalesMitra AI", type="primary", width="stretch")
+        if submitted:
+            question = (question or "").strip()
+            if not question and not image:
+                st.warning("Enter a question or attach an image.")
+            else:
+                if not question:
+                    question = "Explain this image in the context of SalesMitra and tell me how to fix any visible error."
+                _submit_assistant_question(question, image=image)
 
-    st.divider()
-    
-    if len(st.session_state.chat_history) == 0:
-        st.info("Try asking:\n• Show top selling brands\n• Which zone has highest sales?\n• Predict next month's sales")
 
-    for chat in st.session_state.chat_history:
-        with st.chat_message(chat["role"]):
-            st.markdown(chat["content"])
-
-    prompt = st.chat_input("Ask SalesMitra AI...")
-    if prompt:
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                result = ask_chatbot(prompt)
-                answer = result.get("answer", "No response.")
-                st.markdown(answer)
-                st.session_state.chat_history.append({"role": "assistant", "content": answer})
+def _submit_assistant_question(question, image=None):
+    user_text = question + (f"\n\n_Attached image: {image.name}_" if image else "")
+    st.session_state.chat_history.append({"role": "user", "content": user_text})
+    with st.chat_message("user"):
+        st.markdown(user_text)
+    with st.chat_message("assistant"):
+        with st.spinner("SalesMitra AI is checking your question…"):
+            result = ask_chatbot(question, image=image)
+        answer = result.get("answer", "No response was returned.")
+        st.markdown(answer)
+        st.session_state.chat_history.append({"role": "assistant", "content": answer})
 
 def render_profile():
     st.title("👤 Profile & Settings")
@@ -590,12 +1010,9 @@ else:
         
         page = st.radio(
             "Navigation",
-            ["🏠 Dashboard", "📊 Sales Analytics", "🤖 AI Chatbot", "👤 Profile"]
+            ["🏠 Dashboard", "📊 Sales Analytics", "👤 Profile"]
         )
 
-        st.divider()
-        render_dataset_upload()
-        
         st.divider()
         if backend_available():
             st.success("🟢 Backend Connected")
@@ -612,7 +1029,6 @@ else:
         render_dashboard()
     elif page == "📊 Sales Analytics":
         render_analytics()
-    elif page == "🤖 AI Chatbot":
-        render_chatbot()
     elif page == "👤 Profile":
         render_profile()
+    render_shared_assistant()

@@ -1,5 +1,7 @@
 from datetime import datetime
 from pathlib import Path
+import base64
+import binascii
 import sys
 import hashlib
 import hmac
@@ -81,6 +83,8 @@ def verify_password(plain: str, hashed: str) -> bool:
 class ChatbotQuery(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     dataset_id: Optional[int] = None
+    image_data: Optional[str] = Field(default=None, max_length=7_000_000)
+    image_mime_type: Optional[str] = Field(default=None, max_length=40)
 
 
 _LOCAL_SESSION_SECRET = os.urandom(32)
@@ -350,9 +354,22 @@ def get_product_location_clusters(
 
 @app.post("/api/chatbot/query")
 def ask_chatbot(payload: ChatbotQuery, db: Session = Depends(get_db)):
-    """Ask the local RAG chatbot for sales insights or navigation help."""
+    """Ask the RAG assistant for platform help, optionally with an image."""
+    image_bytes = None
+    image_mime_type = payload.image_mime_type or "image/png"
+    if payload.image_data:
+        if image_mime_type not in {"image/png", "image/jpeg", "image/webp"}:
+            raise HTTPException(status_code=415, detail="Attach a PNG, JPG, or WEBP image.")
+        try:
+            image_bytes = base64.b64decode(payload.image_data, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise HTTPException(status_code=400, detail="The attached image could not be read. Please choose it again.") from exc
+        if len(image_bytes) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Images must be 5 MB or smaller. Resize the image and retry.")
+    elif payload.image_mime_type:
+        raise HTTPException(status_code=400, detail="Image type was sent without image data. Attach the image again.")
     bot = SalesMitraChatbot(db, SalesData)
-    return bot.answer(payload.query)
+    return bot.answer(payload.query, image_bytes=image_bytes, image_mime_type=image_mime_type)
 
 
 if __name__ == "__main__":

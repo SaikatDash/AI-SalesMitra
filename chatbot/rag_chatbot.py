@@ -233,10 +233,34 @@ class SalesMitraChatbot:
                 "title": "Suggested chatbot questions",
                 "route": "Chatbot Guide",
                 "content": (
-                    "You can ask questions like: What is SARIMA? How does ARIMA Forecast work? How does every "
-                    "sidebar option work? Which product has highest sales? Predict next-year profit. How do I "
-                    "use Product Clusters? What do RMSE and MAE mean? How do I compare branches? How do I export "
-                    "a report? How do I load CSV data? How do I start the backend and frontend?"
+                    "You can ask what each dashboard option does, how to upload CSV, Excel, or PDF data, how to "
+                    "fix missing or invalid values, how to compare products or branches, how to read an ARIMA "
+                    "forecast, what RMSE and MAE mean, how product clusters work, how to export reports, why a "
+                    "repeated upload was reused, how to manage an account, or how to resolve a Gemini or backend "
+                    "error. Attach a PNG, JPG, or WEBP screenshot to ask about a visible chart or error."
+                ),
+            },
+            {
+                "title": "Fix upload and data errors",
+                "route": "Upload help",
+                "content": (
+                    "For a failed upload, check that the file is CSV, XLS, XLSX, XLSM, or a text-based PDF, "
+                    "is under 15 MB, and contains a header row plus at least one data row. In Excel, remove "
+                    "empty sheets or merged title rows above the table. Keep each column name unique. Put plain "
+                    "numeric values in sales, quantity, price, profit, and cost columns. Correct dates to a "
+                    "consistent format. Review blank cells and duplicate rows before trusting totals. The data "
+                    "quality panel identifies common issues and gives a suggested fix; it does not alter data."
+                ),
+            },
+            {
+                "title": "Chatbot and image help",
+                "route": "AI Chatbot",
+                "content": (
+                    "The SalesMitra AI help chat is available at the bottom of signed-in pages. Ask how the "
+                    "platform works, how to read an analysis, or how to fix an upload or chart error. Attach a "
+                    "PNG, JPG, or WEBP screenshot to ask about visible charts, pages, or error messages. Answers "
+                    "about platform behavior use retrieved SalesMitra help information; image interpretation "
+                    "requires the backend Gemini model and a valid GEMINI_API_KEY."
                 ),
             },
             {
@@ -247,8 +271,27 @@ class SalesMitraChatbot:
             )}
         ]
 
-    def answer(self, query: str) -> Dict[str, Any]:
+    def answer(
+        self,
+        query: str,
+        *,
+        image_bytes: bytes | None = None,
+        image_mime_type: str = "image/png",
+    ) -> Dict[str, Any]:
         normalized = query.lower().strip()
+        if image_bytes is not None:
+            docs = self._retrieve(normalized + " screenshot error upload chart help")
+            return {
+                "answer": self._compose_rag_answer(
+                    query or "Explain the attached SalesMitra image and any visible error.",
+                    docs,
+                    image_bytes=image_bytes,
+                    image_mime_type=image_mime_type,
+                ),
+                "intent": "image_help",
+                "sources": [doc["title"] for doc in docs],
+                "navigation": [{"label": doc["route"], "detail": doc["content"]} for doc in docs],
+            }
         if not normalized:
             return self._question_guide_answer()
 
@@ -288,10 +331,22 @@ class SalesMitraChatbot:
             return self.knowledge_base[:limit]
         return [doc for _, doc in scored[:limit]]
 
-    def _compose_rag_answer(self, query: str, docs: List[Dict[str, str]]) -> str:
+    def _compose_rag_answer(
+        self,
+        query: str,
+        docs: List[Dict[str, str]],
+        *,
+        image_bytes: bytes | None = None,
+        image_mime_type: str = "image/png",
+    ) -> str:
         if gemini_rag_answer:
             try:
-                return gemini_rag_answer(query, docs)
+                return gemini_rag_answer(
+                    query,
+                    docs,
+                    image_bytes=image_bytes,
+                    image_mime_type=image_mime_type,
+                )
             except Exception as exc:
                 provider_detail = getattr(exc, "detail", None)
                 unavailable = str(provider_detail) if provider_detail else "Gemini AI is unavailable right now."
@@ -333,14 +388,20 @@ class SalesMitraChatbot:
         questions = [
             "What is SARIMA model?",
             "How does ARIMA Forecast work?",
-            "How does every sidebar option work?",
+            "What does each dashboard and analytics option do?",
             "Which product has highest sales?",
             "Predict next-year profit.",
             "How do I use Product Clusters?",
             "What do RMSE, MAE, and MAPE mean?",
             "How do I compare branches?",
             "How do I export a report?",
-            "How do I load CSV data or start the backend?",
+            "How do I upload CSV, Excel, or PDF data?",
+            "How do I fix missing or invalid values in an uploaded file?",
+            "Why was my repeated upload reused?",
+            "Can you explain this screenshot or chart?",
+            "What should I do if the backend or Gemini is unavailable?",
+            "How do I manage my account and sign out?",
+            "How do I start the backend and frontend locally?",
         ]
         docs = [doc for doc in self.knowledge_base if doc["title"] == "Suggested chatbot questions"]
         answer = self._compose_rag_answer("What can you help me with?", docs)

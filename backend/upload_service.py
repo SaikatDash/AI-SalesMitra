@@ -29,22 +29,51 @@ def _gemini_api_key() -> str | None:
     return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 
-def gemini_generate(prompt: str, *, pdf_bytes: bytes | None = None) -> str:
+def gemini_generate(
+    prompt: str,
+    *,
+    pdf_bytes: bytes | None = None,
+    image_bytes: bytes | None = None,
+    image_mime_type: str = "image/png",
+    max_output_tokens: int | None = None,
+    thinking_level: str | None = None,
+) -> str:
     api_key = _gemini_api_key()
     if not api_key:
         raise HTTPException(status_code=503, detail="Gemini is not configured. Set GEMINI_API_KEY on the backend.")
     parts: list[dict[str, Any]] = [{"text": prompt}]
     if pdf_bytes is not None:
         parts.append({"inline_data": {"mime_type": "application/pdf", "data": base64.b64encode(pdf_bytes).decode("ascii")}})
+    if image_bytes is not None:
+        parts.append({"inline_data": {"mime_type": image_mime_type, "data": base64.b64encode(image_bytes).decode("ascii")}})
+    generation_config: dict[str, Any] = {"temperature": 0.2}
+    if max_output_tokens is not None:
+        generation_config["maxOutputTokens"] = max_output_tokens
+    if thinking_level is not None:
+        generation_config["thinkingConfig"] = {"thinkingLevel": thinking_level}
     try:
         response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
             headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json={"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.2}},
-            timeout=120,
+            json={
+                "contents": [{"parts": parts}],
+                "generationConfig": generation_config,
+            },
+            timeout=(10, 180),
         )
         response.raise_for_status()
-        return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        payload = response.json()
+        candidates = payload.get("candidates") or []
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        answer_parts = [
+            part["text"]
+            for part in parts
+            if isinstance(part, dict) and part.get("text") and not part.get("thought")
+        ]
+        answer = "\n".join(answer_parts).strip()
+        if not answer:
+            raise HTTPException(status_code=502, detail="Gemini returned an empty answer. Check the model response and backend Gemini configuration.")
+        return answer
     except HTTPException:
         raise
     except requests.HTTPError as exc:
@@ -65,6 +94,11 @@ def gemini_generate(prompt: str, *, pdf_bytes: bytes | None = None) -> str:
         else:
             detail = f"Gemini returned HTTP {status}. Check the backend Gemini configuration and try again."
         raise HTTPException(status_code=502, detail=detail) from exc
+    except requests.Timeout as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Gemini took too long to respond. Retry with a shorter question or a smaller file/image.",
+        ) from exc
     except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"Gemini request failed ({type(exc).__name__}). Check backend connectivity and configuration.") from exc
 
@@ -289,13 +323,29 @@ def gemini_dataset_insight(frame: pd.DataFrame) -> str:
         "say that and suggest which columns the user should inspect. Format as concise markdown.\n"
         + json.dumps(summary, default=str)
     )
-    return gemini_generate(prompt)
+    return gemini_generate(prompt, max_output_tokens=1536, thinking_level="low")
 
 
-def gemini_rag_answer(query: str, context: list[dict[str, str]]) -> str:
+def gemini_rag_answer(
+    query: str,
+    context: list[dict[str, str]],
+    *,
+    image_bytes: bytes | None = None,
+    image_mime_type: str = "image/png",
+) -> str:
     snippets = "\n\n".join(f"[{doc['title']}] {doc['content']}" for doc in context)
+    image_instructions = (
+        "The user attached an image. Inspect it for visible app UI, charts, or error messages. Explain what is visible and give concrete steps to fix any error. Do not claim to see information that is not visible.\n\n"
+        if image_bytes is not None else ""
+    )
     return gemini_generate(
-        "Answer the user's question about this SalesMitra platform using only the retrieved context. "
-        "If the context does not answer it, say what is missing.\n\n"
-        f"Retrieved context:\n{snippets}\n\nUser question: {query}"
+        "You are SalesMitra's platform support assistant. Give a direct, practical answer about using the app. "
+        "Use the retrieved context for platform instructions and do not invent features. For data or runtime errors, "
+        "state the likely cause, what to fix, and the steps to fix it. If context is insufficient, say what is missing.\n\n"
+        f"{image_instructions}"
+        f"Retrieved context:\n{snippets}\n\nUser question: {query}",
+        image_bytes=image_bytes,
+        image_mime_type=image_mime_type,
+        max_output_tokens=1024,
+        thinking_level="low",
     )

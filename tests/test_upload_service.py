@@ -47,7 +47,7 @@ class UploadServiceTests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(any("Choose a sales file" in str(widget.label) for widget in app.file_uploader))
 
-    def test_deployed_dashboard_shows_upload_in_sidebar(self):
+    def test_deployed_dashboard_shows_main_upload_and_floating_help(self):
         class Response:
             status_code = 200
 
@@ -74,6 +74,9 @@ class UploadServiceTests(unittest.TestCase):
 
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(any("Choose a sales file" in str(widget.label) for widget in app.file_uploader))
+        self.assertTrue(any("Welcome to SalesMitra" in widget.value for widget in app.title))
+        self.assertNotIn("🤖 AI Chatbot", app.radio[0].options)
+        self.assertTrue(any("How may I help you?" in item.value for item in app.markdown))
 
     def test_parse_csv_and_excel(self):
         csv_frame = upload_service.parse_upload("sales.csv", b"Product,Sales\nTea,12.5\nCoffee,8\n")
@@ -138,6 +141,31 @@ class UploadServiceTests(unittest.TestCase):
         self.assertEqual(result["answer"], "Gemini grounded help")
         self.assertIn("Load CSV data", result["sources"])
 
+    def test_image_help_passes_image_to_gemini_rag(self):
+        with patch("chatbot.rag_chatbot.gemini_rag_answer", return_value="I can see the upload error.") as rag:
+            result = SalesMitraChatbot(None, None).answer(
+                "What does this error mean?", image_bytes=b"image bytes", image_mime_type="image/jpeg"
+            )
+
+        self.assertEqual(result["intent"], "image_help")
+        self.assertEqual(result["answer"], "I can see the upload error.")
+        rag.assert_called_once()
+        self.assertEqual(rag.call_args.kwargs["image_bytes"], b"image bytes")
+        self.assertEqual(rag.call_args.kwargs["image_mime_type"], "image/jpeg")
+
+    def test_gemini_timeout_returns_actionable_gateway_timeout(self):
+        import requests
+        from fastapi import HTTPException
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}), patch.object(
+            upload_service.requests, "post", side_effect=requests.ReadTimeout("read timed out")
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                upload_service.gemini_generate("test")
+
+        self.assertEqual(raised.exception.status_code, 504)
+        self.assertIn("shorter question", raised.exception.detail)
+
     def test_upload_insight_is_rendered_on_sales_analytics_page(self):
         class Response:
             status_code = 200
@@ -174,6 +202,129 @@ class UploadServiceTests(unittest.TestCase):
 
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(any("Gemini generated a sales trend summary" in item.value for item in app.markdown))
+
+    def test_uploaded_dataset_shows_actionable_data_quality_checks(self):
+        class Response:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        rows = [
+            {"product": "Tea", "sales_amount": "not a number", "branch": None},
+            {"product": "Tea", "sales_amount": "not a number", "branch": None},
+        ]
+
+        def fake_get(url, *args, **kwargs):
+            if url.endswith("/api/datasets"):
+                return Response([{"id": 7, "name": "sales.csv", "row_count": len(rows)}])
+            if url.endswith("/api/datasets/7/rows"):
+                return Response(rows)
+            return Response([])
+
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "frontend" / "sample.py"))
+        app.session_state["user_logged_in"] = True
+        app.session_state["user_id"] = 1
+        app.session_state["user_email"] = "test@example.com"
+        app.session_state["access_token"] = "test-token"
+        app.session_state["active_dataset_id"] = 7
+        with patch("requests.get", side_effect=fake_get):
+            app.run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        messages = "\n".join(widget.value for widget in app.markdown)
+        self.assertIn("blank value(s)", messages)
+        self.assertIn("exact duplicate row(s)", messages)
+        self.assertIn("not numeric", messages)
+        self.assertTrue(any(widget.label == "Open a saved analysis" for widget in app.selectbox))
+
+    def test_uploaded_sales_analytics_shows_arima_and_cluster_sections(self):
+        class Response:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        dates = pd.date_range("2024-01-01", periods=24, freq="MS")
+        rows = [
+            {
+                "order_date": date.isoformat(),
+                "sales_amount": float(100 + index * 7 + (index % 4) * 9),
+                "quantity": 5 + index % 6,
+                "product": "A" if index % 2 else "B",
+            }
+            for index, date in enumerate(dates)
+        ]
+
+        def fake_get(url, *args, **kwargs):
+            if url.endswith("/api/datasets"):
+                return Response([{"id": 8, "name": "orders.csv", "row_count": len(rows), "columns": list(rows[0])}])
+            if url.endswith("/api/datasets/8/rows"):
+                return Response(rows)
+            return Response([])
+
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "frontend" / "sample.py"))
+        app.session_state["user_logged_in"] = True
+        app.session_state["user_id"] = 1
+        app.session_state["user_email"] = "test@example.com"
+        app.session_state["access_token"] = "test-token"
+        app.session_state["active_dataset_id"] = 8
+        with patch("requests.get", side_effect=fake_get):
+            app.run(timeout=30)
+            app.radio[0].set_value("📊 Sales Analytics")
+            app.run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        headings = "\n".join(widget.value for widget in app.subheader)
+        self.assertIn("ARIMA sales forecast", headings)
+        self.assertIn("Product and order clusters", headings)
+
+    def test_floating_chat_keeps_the_ai_response_visible(self):
+        class GetResponse:
+            status_code = 200
+
+            def json(self):
+                return []
+
+        class ChatResponse:
+            status_code = 200
+
+            def json(self):
+                return {"answer": "SalesMitra turns your sales files into summaries, charts, and forecasts."}
+
+        def fake_get(url, *args, **kwargs):
+            if url.endswith("/api/datasets"):
+                return GetResponse()
+            if url.endswith("/api/sales"):
+                return GetResponse()
+            if url.endswith("/api/sales/summary"):
+                return type("SummaryResponse", (), {"status_code": 200, "json": lambda self: {"total_records": 0}})()
+            return type("HealthResponse", (), {"status_code": 200, "json": lambda self: {"status": "ok"}})()
+
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "frontend" / "sample.py"))
+        app.session_state["user_logged_in"] = True
+        app.session_state["user_id"] = 1
+        app.session_state["user_email"] = "test@example.com"
+        app.session_state["access_token"] = "test-token"
+        with patch("requests.get", side_effect=fake_get), patch("requests.post", return_value=ChatResponse()):
+            app.run(timeout=30)
+            question = next(widget for widget in app.text_input if widget.key == "floating_chat_question")
+            question.set_value("What does SalesMitra do?")
+            app.run(timeout=30)
+            send = next(widget for widget in app.button if widget.label == "Send to SalesMitra AI")
+            send.click()
+            app.run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.session_state["chat_history"][-1]["role"], "assistant")
+        self.assertIn("turns your sales files into summaries", app.session_state["chat_history"][-1]["content"])
+        self.assertTrue(any("turns your sales files into summaries" in item.value for item in app.markdown))
 
     def test_cluster_chart_uses_fields_returned_by_backend(self):
         class Response:
