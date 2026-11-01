@@ -220,7 +220,7 @@ def get_api_url():
 
 API_BASE_URL = get_api_url()
 API_TIMEOUT = (10, 180)  # Includes cold starts and slower Gemini-backed operations.
-CHAT_TIMEOUT = (10, 240)
+CHAT_TIMEOUT = (10, 150)
 
 SUGGESTED_HELP_QUESTIONS = [
     "How do I upload a sales file, and which formats are supported?",
@@ -421,9 +421,7 @@ def render_uploaded_dataset(dataset, *, include_advanced=False):
         st.plotly_chart(px.bar(chart_df, x=dimension, y="_amount", title=f"{amount} by {dimension}"), width="stretch")
     if include_advanced:
         st.divider()
-        render_uploaded_arima_forecast(df)
-        st.divider()
-        render_uploaded_cluster_analysis(df)
+        render_sales4_style_analysis(df, dataset["id"])
     st.subheader("Uploaded data")
     st.dataframe(df, width="stretch", height=360)
 
@@ -476,6 +474,181 @@ def render_data_quality_report(df):
 def _numeric_series(values):
     cleaned = values.astype("string").str.replace(r"[,₹$€£]", "", regex=True)
     return pd.to_numeric(cleaned, errors="coerce")
+
+
+def _find_column(df, terms, *, numeric=False):
+    """Find an uploaded column by common sales-data names, preferring exact names."""
+    normalized = {str(column).strip().casefold().replace("_", " "): column for column in df.columns}
+    for term in terms:
+        key = term.casefold().replace("_", " ")
+        if key in normalized:
+            column = normalized[key]
+            if not numeric or _numeric_series(df[column]).notna().any():
+                return column
+    for column in df.columns:
+        name = str(column).strip().casefold().replace("_", " ")
+        if any(term.casefold().replace("_", " ") in name for term in terms):
+            if not numeric or _numeric_series(df[column]).notna().any():
+                return column
+    return None
+
+
+def render_product_location_insights(df, dataset_id, *, sales_column=None):
+    """Let a user choose a product and inspect its best-performing region and branch."""
+    product = _find_column(df, ("brand_name", "brand", "product_name", "product", "item", "sku"))
+    region = _find_column(df, ("zone", "region", "territory", "state", "province"))
+    place = _find_column(df, ("branch_name", "branch", "store", "outlet", "location", "city", "place"))
+    sales = sales_column or _find_column(
+        df, ("sales_amt", "sales_amount", "sales", "revenue", "total_sales", "amount", "order_value"), numeric=True
+    )
+    if not product or not sales:
+        st.info("Product location insights need a product/brand column and a numeric sales or revenue column. Check the uploaded file headers and try again.")
+        return
+
+    work = df[[product, sales] + ([region] if region and region != product else []) + ([place] if place and place not in (product, region) else [])].copy()
+    work[product] = work[product].fillna("Unknown").astype(str)
+    work["_sales"] = _numeric_series(work[sales])
+    work = work.dropna(subset=["_sales"])
+    if work.empty:
+        st.info(f"No numeric sales values were found in '{sales}'. Correct that column and upload the file again.")
+        return
+
+    totals = work.groupby(product)["_sales"].sum().sort_values(ascending=False)
+    product_key = f"cluster_product_{dataset_id}"
+    selected = st.selectbox(
+        "Choose a product to inspect its strongest sales locations",
+        totals.index.tolist(),
+        index=0,
+        key=product_key,
+    )
+    selected_rows = work[work[product] == selected]
+    location_columns = []
+    if region:
+        location_columns.append(region)
+    if place and place not in location_columns:
+        location_columns.append(place)
+    if not location_columns:
+        st.info("Add a region, zone, branch, store, outlet, city, or location column to see where this product sells best.")
+        return
+
+    label_column = location_columns[-1]
+    ranking = (selected_rows.groupby(location_columns, dropna=False)["_sales"].sum()
+               .sort_values(ascending=False).reset_index())
+    if ranking.empty:
+        st.info("No sales locations were found for this product.")
+        return
+    best = ranking.iloc[0]
+    place_label = " / ".join(str(best[column]) for column in location_columns)
+    first, second, third = st.columns(3)
+    first.metric("Selected product", str(selected))
+    second.metric("Top-selling region / place", place_label)
+    third.metric("Sales at top location", f"{best['_sales']:,.2f}")
+    chart = ranking.copy()
+    chart["Location"] = chart[location_columns].fillna("Unknown").astype(str).agg(" / ".join, axis=1)
+    fig = px.bar(chart.head(20), x="Location", y="_sales", title=f"{selected}: sales by region and place")
+    st.plotly_chart(fig, width="stretch")
+    st.dataframe(ranking.rename(columns={"_sales": str(sales)}), hide_index=True, width="stretch")
+
+
+def render_sales4_style_analysis(df, dataset_id):
+    """Offer the sales4 analysis menu while applying every view to the active upload."""
+    menu = (
+        "Quarter vs Year", "Business Metrics", "Branch Analysis", "Product Insights",
+        "Credit Notes", "Branch Compare", "Category Compare", "Product Clusters", "ARIMA Forecast",
+    )
+    selected = st.selectbox("Choose an analysis", menu, key=f"uploaded_analysis_{dataset_id}")
+    sales = _find_column(df, ("sales_amt", "sales_amount", "sales", "revenue", "total_sales", "amount", "order_value"), numeric=True)
+    quantity = _find_column(df, ("sales_qty", "quantity", "qty", "units_sold", "units", "volume"), numeric=True)
+    date = _find_column(df, ("order_date", "sales_date", "date", "mmyyyy", "month", "period", "transaction_date"))
+    product = _find_column(df, ("brand_name", "brand", "product_name", "product", "item", "sku"))
+    branch = _find_column(df, ("branch_name", "branch", "store", "outlet", "location", "city", "place"))
+    region = _find_column(df, ("zone", "region", "territory", "state"))
+    category = _find_column(df, ("mkt_type", "category", "product_category", "segment", "channel"))
+
+    def need(columns):
+        missing = [label for column, label in columns if column is None]
+        if missing:
+            st.info("This analysis needs " + " and ".join(missing) + ". Add those columns to the uploaded file to enable it.")
+            return False
+        return True
+
+    st.subheader(f"📊 {selected}")
+    if selected == "Business Metrics":
+        if not sales and not quantity:
+            need([(sales, "a numeric sales/revenue column"), (quantity, "a numeric quantity column")])
+            return
+        metrics = st.columns(3)
+        metrics[0].metric("Records", f"{len(df):,}")
+        if sales:
+            values = _numeric_series(df[sales])
+            metrics[1].metric("Total sales", f"{values.sum():,.2f}")
+            metrics[2].metric("Average sales", f"{values.mean():,.2f}")
+        elif quantity:
+            metrics[1].metric("Total units", f"{_numeric_series(df[quantity]).sum():,.2f}")
+        if quantity and sales:
+            st.metric("Total quantity", f"{_numeric_series(df[quantity]).sum():,.2f}")
+        dimensions = [c for c in (region, branch, category, product) if c]
+        if sales and dimensions:
+            dimension = st.selectbox("Compare sales by", dimensions, key=f"metrics_dim_{dataset_id}")
+            grouped = df.assign(_value=_numeric_series(df[sales])).groupby(dimension, dropna=False)["_value"].sum().sort_values(ascending=False).head(20).reset_index()
+            fig = px.bar(grouped, x=dimension, y="_value", title=f"Sales by {dimension}")
+            st.plotly_chart(fig, width="stretch")
+    elif selected in ("Quarter vs Year", "Branch Analysis", "Branch Compare"):
+        if not need([(sales, "a numeric sales/revenue column"), (date, "a date/order-date column")] + ([] if selected == "Quarter vs Year" else [(branch, "a branch/location column")])):
+            return
+        work = df.copy()
+        work["_date"] = pd.to_datetime(work[date], errors="coerce")
+        work["_sales"] = _numeric_series(work[sales])
+        work = work.dropna(subset=["_date", "_sales"])
+        if work.empty:
+            st.info(f"No usable date and numeric sales pairs in '{date}' and '{sales}'. Check the date format and sales values.")
+            return
+        work["Year"] = work["_date"].dt.year
+        work["Quarter"] = "Q" + work["_date"].dt.quarter.astype(str)
+        work["Month"] = work["_date"].dt.to_period("M").dt.to_timestamp()
+        if selected == "Quarter vs Year":
+            quarter = st.selectbox("Quarter", sorted(work["Quarter"].unique()), key=f"quarter_{dataset_id}")
+            grouped = work[work["Quarter"] == quarter].groupby("Year", as_index=False)["_sales"].sum()
+            fig = px.bar(grouped, x="Year", y="_sales", title=f"{quarter} sales by year")
+        elif selected == "Branch Analysis":
+            grouped = work.groupby(["Month", branch], as_index=False)["_sales"].sum()
+            fig = px.line(grouped, x="Month", y="_sales", color=branch, title="Monthly branch sales")
+        else:
+            locations = sorted(work[branch].dropna().astype(str).unique())
+            chosen = st.multiselect("Branches to compare", locations, default=locations[:min(5, len(locations))], key=f"branch_compare_{dataset_id}")
+            grouped = work[work[branch].astype(str).isin(chosen)].groupby(["Month", branch], as_index=False)["_sales"].sum()
+            fig = px.line(grouped, x="Month", y="_sales", color=branch, markers=True, title="Branch sales comparison")
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(grouped, hide_index=True, width="stretch")
+    elif selected == "Product Insights":
+        if not need([(sales, "a numeric sales/revenue column"), (product, "a product/brand column")]):
+            return
+        grouped = df.assign(_sales=_numeric_series(df[sales])).groupby(product, dropna=False)["_sales"].sum().sort_values(ascending=False).head(20).reset_index()
+        fig = px.bar(grouped, x=product, y="_sales", title="Top products by sales")
+        st.plotly_chart(fig, width="stretch")
+        render_product_location_insights(df, dataset_id, sales_column=sales)
+    elif selected == "Credit Notes":
+        credit = _find_column(df, ("credit_note_amount", "credit amount", "cn_amt", "refund_amount", "refund", "return_amount", "returns", "credit note"), numeric=True)
+        if not need([(credit, "a numeric credit-note, refund, or return amount column")]):
+            return
+        work = df.assign(_credit=_numeric_series(df[credit]))
+        st.metric("Total credit notes / returns", f"{work['_credit'].sum():,.2f}")
+        dimensions = [column for column in (branch, region, product) if column]
+        if dimensions:
+            dimension = st.selectbox("Break down credit notes by", dimensions, key=f"credit_dim_{dataset_id}")
+            grouped = work.groupby(dimension, dropna=False)["_credit"].sum().sort_values(ascending=False).head(20).reset_index()
+            st.plotly_chart(px.bar(grouped, x=dimension, y="_credit", title=f"Credit notes by {dimension}"), width="stretch")
+    elif selected == "Category Compare":
+        if not need([(sales, "a numeric sales/revenue column"), (category, "a category/channel column")]):
+            return
+        grouped = df.assign(_sales=_numeric_series(df[sales])).groupby(category, dropna=False)["_sales"].sum().sort_values(ascending=False).reset_index()
+        st.plotly_chart(px.bar(grouped.head(30), x=category, y="_sales", title="Sales by category"), width="stretch")
+        st.dataframe(grouped, hide_index=True, width="stretch")
+    elif selected == "Product Clusters":
+        render_uploaded_cluster_analysis(df)
+        render_product_location_insights(df, dataset_id, sales_column=sales)
+    else:
+        render_uploaded_arima_forecast(df)
 
 
 def render_uploaded_arima_forecast(df):

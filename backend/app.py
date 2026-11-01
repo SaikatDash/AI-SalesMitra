@@ -1,11 +1,12 @@
-"""
-Compatibility shim so you can run the backend with:
+"""Compatibility entry point for `uvicorn app:main` from any working folder."""
+from pathlib import Path
+import sys
 
-    uvicorn app:main --reload
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-This file exposes the FastAPI app from `main.py` as the name `main`.
-"""
-from main import app as main
+from backend.main import app as main
 
 # Optional: expose the app also as `app` for other conventions
 app = main

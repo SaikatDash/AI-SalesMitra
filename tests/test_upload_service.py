@@ -47,6 +47,48 @@ class UploadServiceTests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(any("Choose a sales file" in str(widget.label) for widget in app.file_uploader))
 
+    def test_sales4_product_cluster_uses_selected_uploaded_data(self):
+        class Response:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        rows = [
+            {"product": "Tea", "region": "North", "branch": "Central", "sales_amount": 120},
+            {"product": "Tea", "region": "South", "branch": "Harbor", "sales_amount": 80},
+            {"product": "Coffee", "region": "North", "branch": "Central", "sales_amount": 200},
+        ]
+
+        def fake_get(url, *args, **kwargs):
+            if url.endswith("/api/datasets"):
+                return Response([{"id": 9, "name": "sales.csv", "row_count": len(rows), "columns": list(rows[0])}])
+            if url.endswith("/api/datasets/9/rows"):
+                return Response(rows)
+            if url.endswith("/api/sales/summary"):
+                return Response({"total_records": 0})
+            if url.endswith("/api/sales"):
+                return Response([])
+            return Response({"status": "ok"})
+
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "frontend" / "sales4.py"))
+        app.session_state["user_logged_in"] = True
+        app.session_state["user_id"] = 1
+        app.session_state["user_email"] = "test@example.com"
+        app.session_state["access_token"] = "test-token"
+        app.session_state["active_dataset_id"] = 9
+        app.session_state["page"] = "clusters"
+        with patch("requests.get", side_effect=fake_get):
+            app.run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        self.assertTrue(any(widget.key == "sales4_cluster_product_9" for widget in app.selectbox))
+        metrics = "\n".join(widget.label for widget in app.metric)
+        self.assertIn("Best-selling region / place", metrics)
+
     def test_deployed_dashboard_shows_main_upload_and_floating_help(self):
         class Response:
             status_code = 200
@@ -241,7 +283,7 @@ class UploadServiceTests(unittest.TestCase):
         self.assertIn("not numeric", messages)
         self.assertTrue(any(widget.label == "Open a saved analysis" for widget in app.selectbox))
 
-    def test_uploaded_sales_analytics_shows_arima_and_cluster_sections(self):
+    def test_uploaded_sales_analytics_offers_views_and_product_location_drilldown(self):
         class Response:
             status_code = 200
 
@@ -258,6 +300,8 @@ class UploadServiceTests(unittest.TestCase):
                 "sales_amount": float(100 + index * 7 + (index % 4) * 9),
                 "quantity": 5 + index % 6,
                 "product": "A" if index % 2 else "B",
+                "region": "North" if index % 3 else "South",
+                "branch": "Central" if index % 2 else "Riverside",
             }
             for index, date in enumerate(dates)
         ]
@@ -279,11 +323,21 @@ class UploadServiceTests(unittest.TestCase):
             app.run(timeout=30)
             app.radio[0].set_value("📊 Sales Analytics")
             app.run(timeout=30)
+            analysis_picker = next(widget for widget in app.selectbox if widget.key == "uploaded_analysis_8")
+            self.assertIn("Product Clusters", analysis_picker.options)
+            self.assertIn("ARIMA Forecast", analysis_picker.options)
+            analysis_picker.set_value("Product Clusters")
+            app.run(timeout=30)
+            self.assertIn("Product and order clusters", "\n".join(widget.value for widget in app.subheader))
+            cluster_metrics = "\n".join(widget.label for widget in app.metric)
+            analysis_picker = next(widget for widget in app.selectbox if widget.key == "uploaded_analysis_8")
+            analysis_picker.set_value("ARIMA Forecast")
+            app.run(timeout=30)
 
         self.assertEqual(len(app.exception), 0)
         headings = "\n".join(widget.value for widget in app.subheader)
         self.assertIn("ARIMA sales forecast", headings)
-        self.assertIn("Product and order clusters", headings)
+        self.assertIn("Top-selling region / place", cluster_metrics)
 
     def test_floating_chat_keeps_the_ai_response_visible(self):
         class GetResponse:

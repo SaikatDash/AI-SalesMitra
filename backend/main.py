@@ -7,6 +7,14 @@ import hashlib
 import hmac
 import os
 import time
+
+# Make package imports work both from the project root (`backend.main`) and
+# when running inside `backend` (`main:app`). This must happen before any
+# `backend.*` imports below.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import pandas as pd
 from typing import Any
 from typing import Generator, List, Optional
@@ -26,10 +34,6 @@ from backend.model import (
     loginresponse,
     SalesDataResponse,
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
 
 from chatbot.rag_chatbot import SalesMitraChatbot, product_location_cluster_analysis
 from backend.upload_service import MAX_UPLOAD_BYTES, _json_value, dataset_frame, dataset_summary, gemini_dataset_insight, parse_upload, save_dataset

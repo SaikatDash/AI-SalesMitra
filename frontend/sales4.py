@@ -2387,67 +2387,99 @@ elif st.session_state.page == "clusters":
     st.header("Product Location Clustering")
     st.markdown("Find which product has the highest sales in each location and estimate next-year profit.")
 
-    profit_margin = st.slider(
-        "Expected Profit Margin (%)",
-        min_value=0,
-        max_value=100,
-        value=20,
-        step=5,
-        help="Used to estimate next-year profit from projected sales.",
-    )
+    if active_dataset_id is not None:
+        product_col = next((c for c in ("BrandName", "brand_name", "product", "product_name", "item", "sku") if c in df.columns), None)
+        sales_col = next((c for c in ("SalesAmt", "sales_amt", "sales_amount", "sales", "revenue", "amount") if c in df.columns), None)
+        region_col = next((c for c in ("Zone", "zone", "region", "territory", "state") if c in df.columns), None)
+        place_col = next((c for c in ("BranchName", "branch_name", "branch", "store", "outlet", "location", "city") if c in df.columns), None)
+        if product_col is None or sales_col is None:
+            st.info("Product location analysis needs a product/brand column and a numeric sales/revenue column in this upload.")
+        else:
+            uploaded_clusters = df.copy()
+            uploaded_clusters["_sales"] = pd.to_numeric(
+                uploaded_clusters[sales_col].astype(str).str.replace(r"[,₹$€£]", "", regex=True), errors="coerce"
+            )
+            uploaded_clusters = uploaded_clusters.dropna(subset=["_sales"])
+            if uploaded_clusters.empty:
+                st.info(f"No numeric values found in '{sales_col}'. Correct the sales column and upload the file again.")
+            else:
+                products = sorted(uploaded_clusters[product_col].fillna("Unknown").astype(str).unique())
+                selected_product = st.selectbox("Choose a product", products, key=f"sales4_cluster_product_{active_dataset_id}")
+                product_rows = uploaded_clusters[uploaded_clusters[product_col].fillna("Unknown").astype(str) == selected_product]
+                dimensions = [column for column in (region_col, place_col) if column and column != product_col]
+                if dimensions:
+                    ranking = product_rows.groupby(dimensions, dropna=False)["_sales"].sum().sort_values(ascending=False).reset_index()
+                    if not ranking.empty:
+                        top = ranking.iloc[0]
+                        location = " / ".join(str(top[column]) for column in dimensions)
+                        cards = st.columns(3)
+                        cards[0].metric("Selected product", selected_product)
+                        cards[1].metric("Best-selling region / place", location)
+                        cards[2].metric("Sales there", f"₹{top['_sales']:,.2f}")
+                        ranking["Location"] = ranking[dimensions].fillna("Unknown").astype(str).agg(" / ".join, axis=1)
+                        fig = px.bar(ranking.head(20), x="Location", y="_sales", title=f"{selected_product}: sales by region and place")
+                        st.plotly_chart(fig, use_container_width=True)
+                        display_grid_with_export(ranking, "Selected Product Location Ranking", "selected_product_locations")
+                    else:
+                        st.info("No region or place sales rows are available for this product.")
+                else:
+                    st.info("Add a region/zone or branch/location column to find where the selected product sells best.")
 
-    cluster_result = fetch_product_location_clusters(profit_margin)
-    if not cluster_result:
-        st.error("Could not load clustering data from backend.")
-        st.info("Start the backend with: cd backend then python main.py")
-    elif not cluster_result.get("records"):
-        st.warning("No sales data available for clustering. Load the CSV first.")
+                if len(dimensions) > 0:
+                    all_products = uploaded_clusters.groupby(product_col, dropna=False)["_sales"].sum().reset_index()
+                    all_products = all_products.rename(columns={product_col: "Product", "_sales": "Total Sales"})
+                    if len(all_products) >= 2:
+                        all_products["Sales tier"] = pd.qcut(
+                            all_products["Total Sales"].rank(method="first"),
+                            q=min(3, len(all_products)),
+                            labels=[f"Cluster {i + 1}" for i in range(min(3, len(all_products)))],
+                        )
+                        fig = px.scatter(all_products, x="Total Sales", y="Product", color="Sales tier", title="Product sales clusters")
+                        st.plotly_chart(fig, use_container_width=True)
+                        display_grid_with_export(all_products, "Product Cluster Summary", "uploaded_product_clusters")
     else:
-        best = cluster_result.get("best_product_location") or {}
-        metric_cols = st.columns(4)
-        with metric_cols[0]:
-            st.metric("Best Product", best.get("brand_name", "N/A"))
-        with metric_cols[1]:
-            st.metric("Best Location", f"{best.get('branch_name', 'N/A')} / {best.get('zone', 'N/A')}")
-        with metric_cols[2]:
-            st.metric("Total Sales", f"₹{best.get('total_sales', 0):,.0f}")
-        with metric_cols[3]:
-            st.metric("Next-Year Profit", f"₹{best.get('projected_next_year_profit', 0):,.0f}")
-
-        records_df = pd.DataFrame(cluster_result["records"])
-        display_cols = [
-            "cluster",
-            "brand_name",
-            "zone",
-            "branch_name",
-            "total_sales",
-            "total_qty",
-            "projected_next_year_sales",
-            "projected_next_year_profit",
-        ]
-        records_df = records_df[[col for col in display_cols if col in records_df.columns]]
-
-        st.markdown("### Product-location ranking")
-        display_grid_with_export(
-            records_df.round(2),
-            "Product Location Cluster Ranking",
-            "product_location_clusters",
+        profit_margin = st.slider(
+            "Expected Profit Margin (%)",
+            min_value=0,
+            max_value=100,
+            value=20,
+            step=5,
+            help="Used to estimate next-year profit from projected sales.",
         )
 
-        st.markdown("### Cluster summary")
-        summary_df = pd.DataFrame(cluster_result.get("clusters", []))
-        if not summary_df.empty:
-            fig_summary = px.bar(
-                summary_df,
-                x="cluster",
-                y="total_sales",
-                color="cluster",
-                color_discrete_sequence=COLOR_SEQ,
-                template=TEMPLATE,
-                title="Sales by Cluster",
-            )
-            st.plotly_chart(fig_summary, use_container_width=True)
-            display_grid_with_export(summary_df.round(2), "Cluster Summary", "cluster_summary")
+        cluster_result = fetch_product_location_clusters(profit_margin)
+        if not cluster_result:
+            st.error("Could not load clustering data from backend.")
+            st.info("Start the backend with: cd backend then python main.py")
+        elif not cluster_result.get("records"):
+            st.warning("No sales data available for clustering. Load the CSV first.")
+        else:
+            best = cluster_result.get("best_product_location") or {}
+            metric_cols = st.columns(4)
+            with metric_cols[0]:
+                st.metric("Best Product", best.get("brand_name", "N/A"))
+            with metric_cols[1]:
+                st.metric("Best Location", f"{best.get('branch_name', 'N/A')} / {best.get('zone', 'N/A')}")
+            with metric_cols[2]:
+                st.metric("Total Sales", f"₹{best.get('total_sales', 0):,.0f}")
+            with metric_cols[3]:
+                st.metric("Next-Year Profit", f"₹{best.get('projected_next_year_profit', 0):,.0f}")
+
+            records_df = pd.DataFrame(cluster_result["records"])
+            display_cols = [
+                "cluster", "brand_name", "zone", "branch_name", "total_sales", "total_qty",
+                "projected_next_year_sales", "projected_next_year_profit",
+            ]
+            records_df = records_df[[col for col in display_cols if col in records_df.columns]]
+            st.markdown("### Product-location ranking")
+            display_grid_with_export(records_df.round(2), "Product Location Cluster Ranking", "product_location_clusters")
+
+            st.markdown("### Cluster summary")
+            summary_df = pd.DataFrame(cluster_result.get("clusters", []))
+            if not summary_df.empty:
+                fig_summary = px.bar(summary_df, x="cluster", y="total_sales", color="cluster", color_discrete_sequence=COLOR_SEQ, template=TEMPLATE, title="Sales by Cluster")
+                st.plotly_chart(fig_summary, use_container_width=True)
+                display_grid_with_export(summary_df.round(2), "Cluster Summary", "cluster_summary")
 
 # =====================================================================
 # PAGE 9: ARIMA FORECASTING (from arima.ipynb)

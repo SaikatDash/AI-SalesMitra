@@ -37,6 +37,7 @@ def gemini_generate(
     image_mime_type: str = "image/png",
     max_output_tokens: int | None = None,
     thinking_level: str | None = None,
+    request_timeout: tuple[int, int] = (10, 180),
 ) -> str:
     api_key = _gemini_api_key()
     if not api_key:
@@ -59,7 +60,7 @@ def gemini_generate(
                 "contents": [{"parts": parts}],
                 "generationConfig": generation_config,
             },
-            timeout=(10, 180),
+            timeout=request_timeout,
         )
         response.raise_for_status()
         payload = response.json()
@@ -323,7 +324,12 @@ def gemini_dataset_insight(frame: pd.DataFrame) -> str:
         "say that and suggest which columns the user should inspect. Format as concise markdown.\n"
         + json.dumps(summary, default=str)
     )
-    return gemini_generate(prompt, max_output_tokens=1536, thinking_level="low")
+    return gemini_generate(
+        prompt,
+        max_output_tokens=1536,
+        thinking_level="low",
+        request_timeout=(10, 90),
+    )
 
 
 def gemini_rag_answer(
@@ -348,4 +354,5 @@ def gemini_rag_answer(
         image_mime_type=image_mime_type,
         max_output_tokens=1024,
         thinking_level="low",
+        request_timeout=(8, 45),
     )
