@@ -21,7 +21,7 @@ from backend.database_model import UploadedDataset
 
 MAX_UPLOAD_MB = 40
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
-MAX_ROWS = 50_000
+MAX_ROWS = 250_000
 MAX_COLUMNS = 100
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 

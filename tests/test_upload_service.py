@@ -125,6 +125,7 @@ class UploadServiceTests(unittest.TestCase):
     def test_upload_size_limit_is_above_10_mb(self):
         self.assertEqual(upload_service.MAX_UPLOAD_BYTES, 40 * 1024 * 1024)
         self.assertGreater(upload_service.MAX_UPLOAD_BYTES, 10 * 1024 * 1024)
+        self.assertGreaterEqual(upload_service.MAX_ROWS, 54_321)
 
     def test_parse_csv_and_excel(self):
         csv_frame = upload_service.parse_upload("sales.csv", b"Product,Sales\nTea,12.5\nCoffee,8\n")
@@ -416,14 +417,14 @@ class UploadServiceTests(unittest.TestCase):
             app.run(timeout=30)
             app.radio[0].set_value("📊 Sales Analytics")
             app.run(timeout=30)
-            analysis_picker = next(widget for widget in app.radio if widget.key == "uploaded_analysis_8")
+            analysis_picker = next(widget for widget in app.selectbox if widget.key == "uploaded_analysis_8")
             self.assertIn("Product Clusters", analysis_picker.options)
             self.assertIn("ARIMA Forecast", analysis_picker.options)
             analysis_picker.set_value("Product Clusters")
             app.run(timeout=30)
             self.assertIn("Product and order clusters", "\n".join(widget.value for widget in app.subheader))
             cluster_metrics = "\n".join(widget.label for widget in app.metric)
-            analysis_picker = next(widget for widget in app.radio if widget.key == "uploaded_analysis_8")
+            analysis_picker = next(widget for widget in app.selectbox if widget.key == "uploaded_analysis_8")
             analysis_picker.set_value("ARIMA Forecast")
             app.run(timeout=30)
 
@@ -445,14 +446,16 @@ class UploadServiceTests(unittest.TestCase):
         dates = pd.date_range("2023-01-01", periods=24, freq="MS")
         rows = [
             {
-                "order_date": date.isoformat(),
-                "actual_sales": 120 + index * 5,
-                "credit_note_amount": 4 + index % 3,
-                "quantity": 2 + index % 5,
-                "product": "Tea" if index % 2 else "Coffee",
-                "category": "Drinks" if index % 2 else "Hot drinks",
-                "region": "North" if index % 3 else "South",
-                "branch": "Central" if index % 2 else "Harbor",
+                "AcYr": f"{date.year}-{date.year + 1}",
+                "MMYYYY": date.strftime("%Y-%m"),
+                "ActAmt": 120 + index * 5,
+                "SalesAmt": 125 + index * 5,
+                "CNAmt": 4 + index % 3,
+                "SalesQty": 2 + index % 5,
+                "BrandName": "Tea" if index % 2 else "Coffee",
+                "MKTType": "Drinks" if index % 2 else "Hot drinks",
+                "Zone": "North" if index % 3 else "South",
+                "BranchName": "Central" if index % 2 else "Harbor",
             }
             for index, date in enumerate(dates)
         ]
@@ -474,9 +477,9 @@ class UploadServiceTests(unittest.TestCase):
             app.run(timeout=30)
             app.radio[0].set_value("📊 Sales Analytics")
             app.run(timeout=30)
-            analysis = next(widget for widget in app.radio if widget.key == "uploaded_analysis_88")
+            analysis = next(widget for widget in app.selectbox if widget.key == "uploaded_analysis_88")
             for choice in analysis.options:
-                analysis = next(widget for widget in app.radio if widget.key == "uploaded_analysis_88")
+                analysis = next(widget for widget in app.selectbox if widget.key == "uploaded_analysis_88")
                 analysis.set_value(choice)
                 app.run(timeout=30)
                 self.assertEqual(len(app.exception), 0, f"{choice} failed: {app.exception}")

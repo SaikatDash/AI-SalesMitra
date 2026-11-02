@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import plotly.express as px
 import os
+import re
 import warnings
 import base64
 from io import BytesIO
@@ -513,16 +514,20 @@ def _numeric_series(values):
 
 def _find_column(df, terms, *, numeric=False):
     """Find an uploaded column by common sales-data names, preferring exact names."""
-    normalized = {str(column).strip().casefold().replace("_", " "): column for column in df.columns}
+    def normalize(name):
+        name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(name).strip())
+        return re.sub(r"[\s_]+", " ", name).casefold()
+
+    normalized = {normalize(column): column for column in df.columns}
     for term in terms:
-        key = term.casefold().replace("_", " ")
+        key = normalize(term)
         if key in normalized:
             column = normalized[key]
             if not numeric or _numeric_series(df[column]).notna().any():
                 return column
     for column in df.columns:
-        name = str(column).strip().casefold().replace("_", " ")
-        if any(term.casefold().replace("_", " ") in name for term in terms):
+        name = normalize(column)
+        if any(normalize(term) in name for term in terms):
             if not numeric or _numeric_series(df[column]).notna().any():
                 return column
     return None
@@ -666,12 +671,11 @@ def render_sales4_style_analysis(df, dataset_id):
     )
     st.subheader("Analysis options")
     st.caption("Choose an option below. Every analysis uses the selected uploaded sales file.")
-    selected = st.radio(
+    selected = st.selectbox(
         "Choose an analysis",
         menu,
         key=f"uploaded_analysis_{dataset_id}",
-        horizontal=True,
-        label_visibility="collapsed",
+        help="All analyses below use the currently selected uploaded file.",
     )
     sales = _find_column(df, ("sales_amt", "sales_amount", "sales", "revenue", "total_sales", "amount", "order_value"), numeric=True)
     actual = _find_column(df, ("act_amt", "actual_sales", "actual_amount", "net_sales", "net_revenue", "total_actual_sales"), numeric=True) or sales
@@ -1025,7 +1029,9 @@ def render_uploaded_arima_forecast(df):
         rmse = float((pd.Series(residuals).pow(2).mean()) ** 0.5)
         mae = float(pd.Series(residuals).abs().mean())
 
-        adf_stat, adf_pvalue, *_ = adfuller(series.astype(float), autolag="AIC")
+        adf_result = adfuller(series.astype(float), autolag="AIC")
+        adf_stat, adf_pvalue, adf_lags, adf_observations = adf_result[:4]
+        adf_critical = adf_result[4]
         try:
             fitted = ARIMA(series.astype(float), order=order, enforce_stationarity=False, enforce_invertibility=False).fit()
             prediction = fitted.get_forecast(steps=forecast_steps)
@@ -1063,6 +1069,94 @@ def render_uploaded_arima_forecast(df):
             st.dataframe(pd.DataFrame({"Period": test.index, "Actual": test.values, "Predicted": pd.Series(backtest_values).to_numpy(), "Error": residuals}), hide_index=True, width="stretch")
         with st.expander("Future forecast and confidence range", expanded=True):
             st.dataframe(forecast.round(2), hide_index=True, width="stretch")
+
+        st.markdown("### Forecast diagnostics and profit outlook")
+        adf_columns = st.columns(4)
+        adf_columns[0].metric("ADF statistic", f"{adf_stat:.4f}")
+        adf_columns[1].metric("ADF p-value", f"{adf_pvalue:.4f}")
+        adf_columns[2].metric("ADF lags", str(adf_lags))
+        adf_columns[3].metric("Observations", f"{adf_observations:,}")
+        if isinstance(adf_critical, dict):
+            st.caption("ADF critical values: " + " · ".join(
+                f"{name}: {value:.4f}" for name, value in adf_critical.items()
+            ))
+
+        with st.expander("Time-series diagnostics (ACF and PACF)"):
+            if len(series) < 6:
+                st.info("At least six periods are needed for ACF/PACF diagnostics.")
+            else:
+                try:
+                    import matplotlib.pyplot as plt
+                    from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+                    max_lags = min(20, max(1, len(series) // 2 - 1))
+                    fig, axes = plt.subplots(2, 1, figsize=(11, 7))
+                    plot_acf(series.astype(float), lags=max_lags, ax=axes[0])
+                    axes[0].set_title("Autocorrelation function (ACF)")
+                    plot_pacf(series.astype(float), lags=max_lags, ax=axes[1], method="ywm")
+                    axes[1].set_title("Partial autocorrelation function (PACF)")
+                    fig.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                except Exception as exc:
+                    st.info(f"ACF/PACF diagnostics are unavailable for this series ({type(exc).__name__}).")
+
+        with st.expander("Seasonal decomposition"):
+            if is_weekly or len(series) < 24:
+                st.info("Monthly seasonal decomposition needs at least 24 months of history.")
+            else:
+                try:
+                    import matplotlib.pyplot as plt
+                    from statsmodels.tsa.seasonal import seasonal_decompose
+
+                    decomposition = seasonal_decompose(series.astype(float), model="additive", period=12)
+                    fig = decomposition.plot()
+                    fig.set_size_inches(11, 8)
+                    fig.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                except Exception as exc:
+                    st.info(f"Seasonal decomposition is unavailable for this series ({type(exc).__name__}).")
+
+        with st.expander("Profit and loss projection", expanded=True):
+            margin = st.slider(
+                "Expected profit margin (%)", min_value=0, max_value=100, value=20, step=5,
+                key=f"forecast_margin_{st.session_state.get('active_dataset_id', 'default')}",
+                help="This estimate uses the margin you enter; actual profit needs cost or profit data.",
+            )
+            forecast_total = float(forecast["Forecast"].sum())
+            projected_profit = forecast_total * margin / 100
+            comparable_sales = float(series.tail(forecast_steps).mean() * forecast_steps)
+            baseline_profit = comparable_sales * margin / 100
+            growth = ((forecast_total - comparable_sales) / abs(comparable_sales) * 100) if comparable_sales else 0.0
+            profit_cards = st.columns(4)
+            profit_cards[0].metric("Forecast sales", f"{forecast_total:,.2f}")
+            profit_cards[1].metric("Projected profit", f"{projected_profit:,.2f}")
+            profit_cards[2].metric("Comparable-period profit", f"{baseline_profit:,.2f}")
+            profit_cards[3].metric("Sales change vs baseline", f"{growth:+.1f}%")
+
+            recent = series.tail(min(forecast_steps, len(series)))
+            profit_chart = pd.DataFrame({
+                "Period": list(recent.index) + list(forecast["Period"]),
+                "Sales": list(recent.astype(float)) + list(forecast["Forecast"]),
+                "Type": ["Recent actual"] * len(recent) + ["Forecast"] * len(forecast),
+            })
+            profit_chart["Estimated profit"] = profit_chart["Sales"] * margin / 100
+            st.plotly_chart(
+                px.area(profit_chart, x="Period", y="Estimated profit", color="Type",
+                        title=f"Estimated profit at {margin}% margin"),
+                width="stretch",
+            )
+            if margin == 0:
+                st.caption("Set a positive margin to see a profit estimate. No cost or profit column was supplied to calculate actual profit.")
+
+        st.download_button(
+            "Download forecast as CSV",
+            data=forecast.to_csv(index=False).encode("utf-8"),
+            file_name="sales_forecast.csv",
+            mime="text/csv",
+            key=f"forecast_download_{st.session_state.get('active_dataset_id', 'default')}",
+        )
     except Exception as exc:
         st.warning(f"ARIMA analysis could not complete ({type(exc).__name__}). Check the date and numeric sales columns, then retry.")
 

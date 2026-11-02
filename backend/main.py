@@ -9,9 +9,6 @@ import os
 import time
 import logging
 
-# Make package imports work both from the project root (`backend.main`) and
-# when running inside `backend` (`main:app`). This must happen before any
-# `backend.*` imports below.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
