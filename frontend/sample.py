@@ -528,11 +528,12 @@ def _find_column(df, terms, *, numeric=False):
     return None
 
 
-def render_product_location_insights(df, dataset_id, *, sales_column=None):
+def render_product_location_insights(df, dataset_id, *, sales_column=None, include_projection=False):
     """Let a user choose a product and inspect its best-performing region and branch."""
     product = _find_column(df, ("brand_name", "brand", "product_name", "product", "item", "sku"))
     region = _find_column(df, ("zone", "region", "territory", "state", "province"))
     place = _find_column(df, ("branch_name", "branch", "store", "outlet", "location", "city", "place"))
+    quantity = _find_column(df, ("sales_qty", "quantity", "qty", "units_sold", "units", "volume"), numeric=True)
     sales = sales_column or _find_column(
         df, ("sales_amt", "sales_amount", "sales", "revenue", "total_sales", "amount", "order_value"), numeric=True
     )
@@ -548,6 +549,83 @@ def render_product_location_insights(df, dataset_id, *, sales_column=None):
         st.info(f"No numeric sales values were found in '{sales}'. Correct that column and upload the file again.")
         return
 
+    location_columns = []
+    if region:
+        location_columns.append(region)
+    if place and place not in location_columns:
+        location_columns.append(place)
+    group_columns = [product, *location_columns]
+
+    if include_projection:
+        st.markdown("#### Product and location clusters")
+        margin = st.slider(
+            "Expected profit margin (%)", min_value=0, max_value=100, value=20, step=5,
+            key=f"upload_cluster_margin_{dataset_id}",
+        )
+        cluster_rows = work.groupby(group_columns, dropna=False, as_index=False)["_sales"].sum()
+        if quantity:
+            qty_values = _numeric_series(df[quantity])
+            qty_frame = df[group_columns].copy()
+            qty_frame["_quantity"] = qty_values
+            qty_frame = qty_frame.dropna(subset=["_quantity"])
+            quantities = qty_frame.groupby(group_columns, dropna=False, as_index=False)["_quantity"].sum()
+            cluster_rows = cluster_rows.merge(quantities, on=group_columns, how="left")
+        else:
+            cluster_rows["_quantity"] = 0.0
+
+        date_for_projection = _find_column(df, ("order_date", "sales_date", "transaction_date", "date", "mmyyyy", "period"))
+        year_for_projection = _find_column(df, ("financial_year", "fiscal_year", "ac_yr", "year"))
+        if date_for_projection:
+            work["_projection_year"] = pd.to_datetime(df[date_for_projection], errors="coerce").dt.year
+        elif year_for_projection:
+            year_text = df[year_for_projection].astype("string").str.extract(r"((?:19|20)\d{2})", expand=False)
+            work["_projection_year"] = pd.to_numeric(year_text, errors="coerce")
+        else:
+            work["_projection_year"] = pd.NA
+
+        projected = []
+        for _, cluster_row in cluster_rows.iterrows():
+            mask = pd.Series(True, index=work.index)
+            for column in group_columns:
+                if pd.isna(cluster_row[column]):
+                    mask &= work[column].isna()
+                else:
+                    mask &= work[column].astype(str).eq(str(cluster_row[column]))
+            yearly = work.loc[mask].dropna(subset=["_projection_year"]).groupby("_projection_year")["_sales"].sum().sort_index()
+            if len(yearly) >= 2:
+                next_sales = max(0.0, float(yearly.iloc[-1] + yearly.diff().tail(3).mean()))
+            else:
+                next_sales = float(cluster_row["_sales"])
+            projected.append(next_sales)
+        cluster_rows["Projected next-year sales"] = projected
+        cluster_rows["Projected next-year profit"] = cluster_rows["Projected next-year sales"] * (margin / 100)
+        if len(cluster_rows) > 1:
+            tier_count = min(3, len(cluster_rows))
+            cluster_rows["cluster"] = pd.qcut(
+                cluster_rows["_sales"].rank(method="first"),
+                q=tier_count,
+                labels=["Low Sales", "Medium Sales", "High Sales"][:tier_count],
+            ).astype(str)
+        else:
+            cluster_rows["cluster"] = "High Sales"
+
+        total_profit = cluster_rows["Projected next-year profit"].sum()
+        cards = st.columns(3)
+        cards[0].metric("Product/location groups", f"{len(cluster_rows):,}")
+        cards[1].metric("Total sales", f"{cluster_rows['_sales'].sum():,.2f}")
+        cards[2].metric("Projected profit", f"{total_profit:,.2f}")
+        cluster_summary = cluster_rows.groupby("cluster", as_index=False, observed=False).agg(
+            Products=(product, "nunique"),
+            Total_Sales=("_sales", "sum"),
+            Projected_Profit=("Projected next-year profit", "sum"),
+        )
+        st.plotly_chart(px.bar(cluster_summary, x="cluster", y="Total_Sales", color="cluster", title="Sales by product cluster"), width="stretch")
+        st.dataframe(
+            cluster_rows.rename(columns={product: "Product", **({region: "Region"} if region else {}), **({place: "Branch / place"} if place else {}), "_sales": "Total sales", "_quantity": "Total quantity"}),
+            hide_index=True,
+            width="stretch",
+        )
+
     totals = work.groupby(product)["_sales"].sum().sort_values(ascending=False)
     product_key = f"cluster_product_{dataset_id}"
     selected = st.selectbox(
@@ -557,11 +635,6 @@ def render_product_location_insights(df, dataset_id, *, sales_column=None):
         key=product_key,
     )
     selected_rows = work[work[product] == selected]
-    location_columns = []
-    if region:
-        location_columns.append(region)
-    if place and place not in location_columns:
-        location_columns.append(place)
     if not location_columns:
         st.info("Add a region, zone, branch, store, outlet, city, or location column to see where this product sells best.")
         return
@@ -586,7 +659,7 @@ def render_product_location_insights(df, dataset_id, *, sales_column=None):
 
 
 def render_sales4_style_analysis(df, dataset_id):
-    """Offer the sales4 analysis menu while applying every view to the active upload."""
+    """Run the full sales4 analysis menu against the currently selected upload."""
     menu = (
         "Quarter vs Year", "Business Metrics", "Branch Analysis", "Product Insights",
         "Credit Notes", "Branch Compare", "Category Compare", "Product Clusters", "ARIMA Forecast",
@@ -601,113 +674,296 @@ def render_sales4_style_analysis(df, dataset_id):
         label_visibility="collapsed",
     )
     sales = _find_column(df, ("sales_amt", "sales_amount", "sales", "revenue", "total_sales", "amount", "order_value"), numeric=True)
+    actual = _find_column(df, ("act_amt", "actual_sales", "actual_amount", "net_sales", "net_revenue", "total_actual_sales"), numeric=True) or sales
     quantity = _find_column(df, ("sales_qty", "quantity", "qty", "units_sold", "units", "volume"), numeric=True)
-    date = _find_column(df, ("order_date", "sales_date", "date", "mmyyyy", "month", "period", "transaction_date"))
+    credit = _find_column(df, ("cn_amt", "credit_note_amount", "credit amount", "refund_amount", "return_amount", "returns", "refund", "credit note"), numeric=True)
+    date_column = _find_column(df, ("order_date", "sales_date", "transaction_date", "date", "mmyyyy", "period", "month_year"))
+    year_column = _find_column(df, ("financial_year", "fiscal_year", "ac_yr", "year"))
+    month_column = _find_column(df, ("month_name", "month"))
     product = _find_column(df, ("brand_name", "brand", "product_name", "product", "item", "sku"))
     branch = _find_column(df, ("branch_name", "branch", "store", "outlet", "location", "city", "place"))
     region = _find_column(df, ("zone", "region", "territory", "state"))
-    category = _find_column(df, ("mkt_type", "category", "product_category", "segment", "channel"))
+    category = _find_column(df, ("mkt_type", "category", "product_category", "segment", "channel")) or product
 
-    def need(columns):
-        missing = [label for column, label in columns if column is None]
-        if missing:
-            st.info("This analysis needs " + " and ".join(missing) + ". Add those columns to the uploaded file to enable it.")
-            return False
-        return True
+    if not sales and not actual:
+        st.info("These analyses need a numeric sales, revenue, or actual-sales column. Add one to the uploaded file to enable the sales charts.")
+        return
+
+    work = df.copy()
+    work["_Actual"] = _numeric_series(work[actual]) if actual else 0.0
+    work["_Credit"] = _numeric_series(work[credit]).fillna(0) if credit else 0.0
+    work["_Total"] = work["_Actual"] + work["_Credit"]
+    if quantity:
+        work["_Quantity"] = _numeric_series(work[quantity]).fillna(0)
+
+    # Uploaded files often use YYYYMM, MMYYYY, a separate month column, or a
+    # financial-year column instead of a full date. Normalize these into the
+    # same year/month fields used by the sales4 analyses.
+    date_values = pd.Series(pd.NaT, index=work.index, dtype="datetime64[ns]")
+    if date_column:
+        raw_date = work[date_column].astype("string").str.strip()
+        date_values = pd.to_datetime(raw_date, errors="coerce")
+        six_digits = raw_date.str.fullmatch(r"\d{6}", na=False)
+        if six_digits.any():
+            yyyymm = raw_date.str[:4].between("1900", "2100")
+            parse_yyyymm = six_digits & yyyymm
+            parse_mmyyyy = six_digits & ~yyyymm
+            date_values.loc[parse_yyyymm] = pd.to_datetime(raw_date[parse_yyyymm], format="%Y%m", errors="coerce")
+            date_values.loc[parse_mmyyyy] = pd.to_datetime(raw_date[parse_mmyyyy], format="%m%Y", errors="coerce")
+
+    parsed_year = pd.Series(pd.NA, index=work.index, dtype="Int64")
+    if year_column:
+        year_text = work[year_column].astype("string").str.extract(r"((?:19|20)\d{2})", expand=False)
+        parsed_year = pd.to_numeric(year_text, errors="coerce").astype("Int64")
+    work["_Year"] = date_values.dt.year.astype("Int64").fillna(parsed_year)
+
+    month_number = date_values.dt.month.astype("Int64")
+    if month_column:
+        month_text = work[month_column].astype("string").str.strip()
+        numeric_month = pd.to_numeric(month_text, errors="coerce")
+        month_names = month_text.str.casefold().str[:3].map({
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+        })
+        parsed_month = numeric_month.where(numeric_month.between(1, 12), month_names).astype("Int64")
+        month_number = month_number.fillna(parsed_month)
+    work["_MonthNumber"] = month_number
+    work["_Month"] = work["_MonthNumber"].map(lambda value: pd.Timestamp(2000, int(value), 1).strftime("%B") if pd.notna(value) else None)
+    work["_Quarter"] = work["_MonthNumber"].map(lambda value: f"Q{((int(value) - 1) // 3) + 1}" if pd.notna(value) else None)
+    work["_Branch"] = work[branch].fillna("Unknown").astype(str) if branch else "All locations"
+    work["_Region"] = work[region].fillna("Unknown").astype(str) if region else "All regions"
+    work["_Category"] = work[category].fillna("Unknown").astype(str) if category else "Uncategorized"
+    work["_Product"] = work[product].fillna("Unknown").astype(str) if product else "Unknown product"
+    years = sorted(int(year) for year in work["_Year"].dropna().unique())
+    months = [pd.Timestamp(2000, month, 1).strftime("%B") for month in range(1, 13) if month in work["_MonthNumber"].dropna().astype(int).unique()]
+
+    def choose_years(key, *, multiple=False):
+        if not years:
+            return work.copy()
+        if multiple:
+            default = years[-min(3, len(years)):]
+            selected_years = st.multiselect("Select up to 3 financial years", years, default=default, key=key)
+            if len(selected_years) > 3:
+                st.warning("Select up to 3 financial years; the first three are used.")
+                selected_years = selected_years[:3]
+            return work[work["_Year"].isin(selected_years)].copy()
+        year = st.selectbox("Select financial year", years, index=len(years) - 1, key=key)
+        return work[work["_Year"] == year].copy()
+
+    def year_month_chart(frame, value_column, title, *, chart_type="Bar", color_column=None):
+        if frame.empty or frame[value_column].fillna(0).sum() == 0:
+            st.info(f"No {title.casefold()} values are available for the selected filters.")
+            return
+        if chart_type == "Line":
+            fig = px.line(frame, x="_Month", y=value_column, color=color_column, markers=True, title=title)
+        elif chart_type == "Area":
+            fig = px.area(frame, x="_Month", y=value_column, color=color_column, title=title)
+        elif chart_type == "Pie":
+            pie = frame.groupby(color_column or "_Month", as_index=False)[value_column].sum()
+            fig = px.pie(pie, names=color_column or "_Month", values=value_column, title=title)
+        else:
+            fig = px.bar(frame, x="_Month", y=value_column, color=color_column or "_Month", barmode="group", title=title)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(frame, hide_index=True, width="stretch")
+        top = frame.loc[frame[value_column].idxmax()]
+        st.success(f"Highest {title.casefold()}: {top['_Month']} · {float(top[value_column]):,.2f}")
+
+    def metric_panels(frame, group_columns, *, title_prefix, chart_type="Bar", color_column=None):
+        for value_column, label in (("_Actual", "Actual sales"), ("_Credit", "Credit notes"), ("_Total", "Total sales")):
+            grouped = frame.groupby(group_columns, dropna=False, as_index=False)[value_column].sum()
+            if "_MonthNumber" in grouped:
+                grouped = grouped.sort_values("_MonthNumber")
+            color = color_column or ("_Year" if "_Year" in group_columns else (group_columns[-1] if len(group_columns) > 1 else "_Month"))
+            year_month_chart(grouped, value_column, f"{title_prefix} · {label}", chart_type=chart_type, color_column=color)
 
     st.subheader(f"📊 {selected}")
-    if selected == "Business Metrics":
-        if not sales and not quantity:
-            need([(sales, "a numeric sales/revenue column"), (quantity, "a numeric quantity column")])
+    if selected == "Quarter vs Year":
+        if not years or work["_Quarter"].notna().sum() == 0:
+            st.info("Quarter vs Year needs a date/month column or separate year and month columns.")
             return
-        metrics = st.columns(3)
-        metrics[0].metric("Records", f"{len(df):,}")
-        if sales:
-            values = _numeric_series(df[sales])
-            metrics[1].metric("Total sales", f"{values.sum():,.2f}")
-            metrics[2].metric("Average sales", f"{values.mean():,.2f}")
-        elif quantity:
-            metrics[1].metric("Total units", f"{_numeric_series(df[quantity]).sum():,.2f}")
-        if quantity and sales:
-            st.metric("Total quantity", f"{_numeric_series(df[quantity]).sum():,.2f}")
-        dimensions = [c for c in (region, branch, category, product) if c]
-        if sales and dimensions:
-            dimension = st.selectbox("Compare sales by", dimensions, key=f"metrics_dim_{dataset_id}")
-            grouped = df.assign(_value=_numeric_series(df[sales])).groupby(dimension, dropna=False)["_value"].sum().sort_values(ascending=False).head(20).reset_index()
-            fig = px.bar(grouped, x=dimension, y="_value", title=f"Sales by {dimension}")
-            st.plotly_chart(fig, width="stretch")
-    elif selected in ("Quarter vs Year", "Branch Analysis", "Branch Compare"):
-        if not need([(sales, "a numeric sales/revenue column"), (date, "a date/order-date column")] + ([] if selected == "Quarter vs Year" else [(branch, "a branch/location column")])):
-            return
-        work = df.copy()
-        work["_date"] = pd.to_datetime(work[date], errors="coerce")
-        work["_sales"] = _numeric_series(work[sales])
-        work = work.dropna(subset=["_date", "_sales"])
-        if work.empty:
-            st.info(f"No usable date and numeric sales pairs in '{date}' and '{sales}'. Check the date format and sales values.")
-            return
-        work["Year"] = work["_date"].dt.year
-        work["Quarter"] = "Q" + work["_date"].dt.quarter.astype(str)
-        work["Month"] = work["_date"].dt.to_period("M").dt.to_timestamp()
-        if selected == "Quarter vs Year":
-            quarter = st.selectbox("Quarter", sorted(work["Quarter"].unique()), key=f"quarter_{dataset_id}")
-            grouped = work[work["Quarter"] == quarter].groupby("Year", as_index=False)["_sales"].sum()
-            fig = px.bar(grouped, x="Year", y="_sales", title=f"{quarter} sales by year")
-        elif selected == "Branch Analysis":
-            grouped = work.groupby(["Month", branch], as_index=False)["_sales"].sum()
-            fig = px.line(grouped, x="Month", y="_sales", color=branch, title="Monthly branch sales")
+        quarter = st.selectbox("Select quarter", ["Q1", "Q2", "Q3", "Q4"], key=f"quarter_{dataset_id}")
+        year_options = st.multiselect("Select up to 3 years to compare", years, default=years[-min(3, len(years)):], key=f"quarter_years_{dataset_id}")
+        if len(year_options) > 3:
+            st.warning("Select a maximum of three years.")
+            year_options = year_options[:3]
+        grouped = (work[work["_Quarter"].eq(quarter) & work["_Year"].isin(year_options)]
+                   .groupby("_Year", as_index=False)["_Actual"].sum())
+        if grouped.empty:
+            st.info("No sales exist for the selected quarter and years.")
         else:
-            locations = sorted(work[branch].dropna().astype(str).unique())
-            chosen = st.multiselect("Branches to compare", locations, default=locations[:min(5, len(locations))], key=f"branch_compare_{dataset_id}")
-            grouped = work[work[branch].astype(str).isin(chosen)].groupby(["Month", branch], as_index=False)["_sales"].sum()
-            fig = px.line(grouped, x="Month", y="_sales", color=branch, markers=True, title="Branch sales comparison")
-        st.plotly_chart(fig, width="stretch")
-        st.dataframe(grouped, hide_index=True, width="stretch")
+            fig = px.bar(grouped, x="_Year", y="_Actual", color="_Year", title=f"{quarter} actual sales by year")
+            st.plotly_chart(fig, width="stretch")
+            st.dataframe(grouped, hide_index=True, width="stretch")
+            top = grouped.loc[grouped["_Actual"].idxmax()]
+            st.success(f"Highest {quarter} sales: {int(top['_Year'])} · {float(top['_Actual']):,.2f}")
+
+    elif selected == "Business Metrics":
+        frame = choose_years(f"business_year_{dataset_id}")
+        values = st.columns(4)
+        values[0].metric("Records", f"{len(frame):,}")
+        values[1].metric("Actual sales", f"{frame['_Actual'].sum():,.2f}")
+        values[2].metric("Credit notes", f"{frame['_Credit'].sum():,.2f}")
+        values[3].metric("Quantity", f"{frame['_Quantity'].sum():,.2f}" if quantity else "Not in file")
+        if frame["_Month"].notna().any():
+            monthly = frame.groupby(["_MonthNumber", "_Month"], as_index=False)[["_Actual", "_Credit", "_Total"]].sum().sort_values("_MonthNumber")
+            metric_panels(monthly, ["_MonthNumber", "_Month"], title_prefix="Business metrics")
+        else:
+            grouped = frame.groupby("_Year", dropna=False, as_index=False)[["_Actual", "_Credit", "_Total"]].sum()
+            st.dataframe(grouped, hide_index=True, width="stretch")
+
+    elif selected == "Branch Analysis":
+        frame = choose_years(f"branch_year_{dataset_id}")
+        branch_names = sorted(frame["_Branch"].astype(str).unique())
+        if not branch or not branch_names:
+            st.info("Branch Analysis needs a branch, store, outlet, or location column.")
+            return
+        branch_name = st.selectbox("Select branch", branch_names, key=f"branch_name_{dataset_id}")
+        selected_months = st.multiselect("Select month(s)", months, default=months, key=f"branch_months_{dataset_id}")
+        chart_type = st.selectbox("Choose chart type", ["Bar", "Line", "Pie", "Area"], key=f"branch_chart_{dataset_id}")
+        frame = frame[frame["_Branch"].eq(branch_name)]
+        if selected_months:
+            frame = frame[frame["_Month"].isin(selected_months)]
+        if frame["_Month"].notna().any():
+            monthly = frame.groupby(["_MonthNumber", "_Month"], as_index=False)[["_Actual", "_Credit", "_Total"]].sum().sort_values("_MonthNumber")
+            metric_panels(monthly, ["_MonthNumber", "_Month"], title_prefix=branch_name, chart_type=chart_type)
+        elif not frame.empty:
+            st.metric("Actual sales", f"{frame['_Actual'].sum():,.2f}")
+            st.metric("Credit notes", f"{frame['_Credit'].sum():,.2f}")
+            st.metric("Total sales", f"{frame['_Total'].sum():,.2f}")
+        else:
+            st.info("No rows match this branch and month selection.")
+
     elif selected == "Product Insights":
-        if not need([(sales, "a numeric sales/revenue column"), (product, "a product/brand column")]):
+        frame = choose_years(f"product_year_{dataset_id}")
+        categories = sorted(frame["_Category"].astype(str).unique())
+        if not categories:
+            st.info("Product Insights needs a product or category column.")
             return
-        grouped = df.assign(_sales=_numeric_series(df[sales])).groupby(product, dropna=False)["_sales"].sum().sort_values(ascending=False).head(20).reset_index()
-        fig = px.bar(grouped, x=product, y="_sales", title="Top products by sales")
-        st.plotly_chart(fig, width="stretch")
-        render_product_location_insights(df, dataset_id, sales_column=sales)
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_categories = st.multiselect("Product categories", categories, default=categories, key=f"product_categories_{dataset_id}")
+        with col2:
+            selected_months = st.multiselect("Months", months, default=months, key=f"product_months_{dataset_id}")
+        chart_type = st.selectbox("Choose chart type", ["Bar", "Line", "Pie", "Area"], key=f"product_chart_{dataset_id}")
+        frame = frame[frame["_Category"].isin(selected_categories)]
+        if selected_months:
+            frame = frame[frame["_Month"].isin(selected_months)]
+        if frame.empty:
+            st.info("No rows match the selected product categories and months.")
+            return
+        monthly = frame.groupby(["_MonthNumber", "_Month", "_Category"], as_index=False)[["_Actual", "_Credit", "_Total"]].sum().sort_values("_MonthNumber")
+        st.markdown("#### Month-wise product category sales")
+        year_month_chart(monthly, "_Actual", "Monthly actual sales by category", chart_type=chart_type, color_column="_Category")
+        yearly = frame.groupby(["_Year", "_Category"], dropna=False, as_index=False)[["_Actual", "_Credit", "_Total"]].sum()
+        st.markdown("#### Yearly product category sales")
+        st.plotly_chart(px.bar(yearly, x="_Category", y="_Actual", color="_Year", barmode="group", title="Yearly actual sales by category"), width="stretch")
+        st.dataframe(yearly, hide_index=True, width="stretch")
+        render_product_location_insights(df, dataset_id, sales_column=actual)
+
     elif selected == "Credit Notes":
-        credit = _find_column(df, ("credit_note_amount", "credit amount", "cn_amt", "refund_amount", "refund", "return_amount", "returns", "credit note"), numeric=True)
-        if not need([(credit, "a numeric credit-note, refund, or return amount column")]):
+        if not credit:
+            st.info("Credit Notes needs a credit-note, refund, return amount column. Add one to the file to enable this analysis.")
             return
-        work = df.assign(_credit=_numeric_series(df[credit]))
-        st.metric("Total credit notes / returns", f"{work['_credit'].sum():,.2f}")
-        dimensions = [column for column in (branch, region, product) if column]
-        if dimensions:
-            dimension = st.selectbox("Break down credit notes by", dimensions, key=f"credit_dim_{dataset_id}")
-            grouped = work.groupby(dimension, dropna=False)["_credit"].sum().sort_values(ascending=False).head(20).reset_index()
-            st.plotly_chart(px.bar(grouped, x=dimension, y="_credit", title=f"Credit notes by {dimension}"), width="stretch")
+        frame = choose_years(f"credit_years_{dataset_id}", multiple=True)
+        cumulative = st.checkbox("Show cumulative analysis", key=f"credit_cumulative_{dataset_id}")
+        if frame["_Month"].notna().any():
+            monthly = frame.groupby(["_Year", "_MonthNumber", "_Month"], as_index=False)[["_Actual", "_Credit", "_Total"]].sum().sort_values(["_Year", "_MonthNumber"])
+            if cumulative:
+                monthly = monthly.groupby(["_MonthNumber", "_Month"], as_index=False)[["_Actual", "_Credit", "_Total"]].sum().sort_values("_MonthNumber")
+                monthly[["_Actual", "_Credit", "_Total"]] = monthly[["_Actual", "_Credit", "_Total"]].cumsum()
+            metric_panels(monthly, ["_MonthNumber", "_Month"], title_prefix="Financial year comparison")
+        else:
+            st.dataframe(frame.groupby("_Year", as_index=False)[["_Actual", "_Credit", "_Total"]].sum(), hide_index=True, width="stretch")
+
+    elif selected == "Branch Compare":
+        frame = choose_years(f"branch_compare_years_{dataset_id}", multiple=True)
+        if not branch:
+            st.info("Branch Compare needs a branch, store, outlet, or location column.")
+            return
+        if frame.empty:
+            st.info("Select at least one year containing branch sales to compare.")
+            return
+        branch_names = sorted(frame["_Branch"].astype(str).unique())
+        branch_name = st.selectbox("Select branch", branch_names, key=f"branch_compare_name_{dataset_id}")
+        cumulative = st.checkbox("Show cumulative analysis", key=f"branch_compare_cumulative_{dataset_id}")
+        frame = frame[frame["_Branch"].eq(branch_name)]
+        if frame["_Month"].notna().any():
+            grouped = frame.groupby(["_Year", "_MonthNumber", "_Month"], as_index=False)[["_Actual", "_Credit", "_Total"]].sum().sort_values(["_Year", "_MonthNumber"])
+            if cumulative:
+                grouped = grouped.groupby(["_MonthNumber", "_Month"], as_index=False)[["_Actual", "_Credit", "_Total"]].sum().sort_values("_MonthNumber")
+                grouped[["_Actual", "_Credit", "_Total"]] = grouped[["_Actual", "_Credit", "_Total"]].cumsum()
+            metric_panels(
+                grouped,
+                ["_MonthNumber", "_Month"] if cumulative else ["_Year", "_MonthNumber", "_Month"],
+                title_prefix=f"{branch_name} comparison",
+                color_column="_Year" if not cumulative else None,
+            )
+        else:
+            st.info("No dated records are available for this branch comparison.")
+
     elif selected == "Category Compare":
-        if not need([(sales, "a numeric sales/revenue column"), (category, "a category/channel column")]):
+        frame = choose_years(f"category_years_{dataset_id}", multiple=True)
+        if frame.empty:
+            st.info("Select at least one year containing category sales to compare.")
             return
-        grouped = df.assign(_sales=_numeric_series(df[sales])).groupby(category, dropna=False)["_sales"].sum().sort_values(ascending=False).reset_index()
-        st.plotly_chart(px.bar(grouped.head(30), x=category, y="_sales", title="Sales by category"), width="stretch")
+        dimensions = []
+        if branch:
+            dimensions.append("_Branch")
+        if category:
+            dimensions.append("_Category")
+        if not dimensions:
+            st.info("Category Compare needs product/category and optionally branch/location columns.")
+            return
+        col1, col2 = st.columns(2)
+        if "_Branch" in dimensions:
+            branches = sorted(frame["_Branch"].astype(str).unique())
+            chosen_branch = col1.selectbox("Branch", branches, key=f"category_branch_{dataset_id}")
+            frame = frame[frame["_Branch"].eq(chosen_branch)]
+        categories = sorted(frame["_Category"].astype(str).unique())
+        chosen_categories = col2.multiselect("Product categories", categories, default=categories, key=f"category_types_{dataset_id}")
+        frame = frame[frame["_Category"].isin(chosen_categories)]
+        selected_months = st.multiselect("Months", months, default=months, key=f"category_months_{dataset_id}")
+        if selected_months:
+            frame = frame[frame["_Month"].isin(selected_months)]
+        level = st.radio("Analysis level", ["Month-wise", "Yearly"], horizontal=True, key=f"category_level_{dataset_id}")
+        measure = st.radio("Sales measure", ["Actual sales", "Credit notes", "Total sales"], horizontal=True, key=f"category_measure_{dataset_id}")
+        value_column = {"Actual sales": "_Actual", "Credit notes": "_Credit", "Total sales": "_Total"}[measure]
+        cumulative = st.checkbox("Show cumulative analysis", key=f"category_cumulative_{dataset_id}")
+        if frame.empty:
+            st.info("No rows match the selected branch, year, category, and month filters.")
+            return
+        if level == "Month-wise" and frame["_Month"].notna().any():
+            grouped = frame.groupby(["_Year", "_MonthNumber", "_Month", "_Category"], as_index=False)[value_column].sum().sort_values(["_Year", "_MonthNumber"])
+            x_column, color_column = "_Month", "_Category"
+            if cumulative:
+                grouped = grouped.groupby(["_MonthNumber", "_Month"], as_index=False)[value_column].sum().sort_values("_MonthNumber")
+                grouped[value_column] = grouped[value_column].cumsum()
+                color_column = "_Month"
+        else:
+            grouped = frame.groupby(["_Year", "_Category"], dropna=False, as_index=False)[value_column].sum()
+            x_column, color_column = "_Category", "_Year"
+            if cumulative:
+                grouped = grouped.sort_values("_Year").copy()
+                grouped[value_column] = grouped.groupby("_Category")[value_column].cumsum()
+        fig = px.bar(grouped, x=x_column, y=value_column, color=color_column, barmode="group", title=f"{level} {measure} by category")
+        st.plotly_chart(fig, width="stretch")
         st.dataframe(grouped, hide_index=True, width="stretch")
+
     elif selected == "Product Clusters":
         render_uploaded_cluster_analysis(df)
-        render_product_location_insights(df, dataset_id, sales_column=sales)
+        render_product_location_insights(df, dataset_id, sales_column=actual, include_projection=True)
     else:
         render_uploaded_arima_forecast(df)
 
 
 def render_uploaded_arima_forecast(df):
-    """Fit an ARIMA forecast when the uploaded table has dates and a numeric measure."""
+    """Run a sales4-style ARIMA backtest and future forecast on the selected upload."""
     st.subheader("🔮 ARIMA sales forecast")
-    date_terms = ("date", "time", "month", "period", "mmyyyy")
-    date_column = next(
-        (column for column in df.columns if any(term in str(column).casefold() for term in date_terms)),
-        None,
-    )
-    metric_terms = ("sales", "revenue", "amount", "turnover", "total", "price", "profit", "quantity", "qty", "units")
-    metric_column = next(
-        (column for column in df.columns
-         if any(term in str(column).casefold() for term in metric_terms)
-         and _numeric_series(df[column]).notna().sum() >= 3),
-        None,
+    date_column = _find_column(df, ("order_date", "sales_date", "transaction_date", "date", "mmyyyy", "period"))
+    metric_column = _find_column(
+        df,
+        ("act_amt", "actual_sales", "net_sales", "sales_amt", "sales_amount", "sales", "revenue", "amount", "total_sales", "quantity", "qty", "units"),
+        numeric=True,
     )
     if date_column is None or metric_column is None:
         missing = []
@@ -718,59 +974,97 @@ def render_uploaded_arima_forecast(df):
         st.info("ARIMA needs " + " and ".join(missing) + ". Add those columns to the uploaded file to enable forecasting.")
         return
 
-    dated_values = pd.to_datetime(df[date_column], errors="coerce")
+    raw_dates = df[date_column].astype("string").str.strip()
+    dated_values = pd.to_datetime(raw_dates, errors="coerce")
+    six_digits = raw_dates.str.fullmatch(r"\d{6}", na=False)
+    if six_digits.any():
+        yyyymm = raw_dates.str[:4].between("1900", "2100")
+        dated_values.loc[six_digits & yyyymm] = pd.to_datetime(raw_dates[six_digits & yyyymm], format="%Y%m", errors="coerce")
+        dated_values.loc[six_digits & ~yyyymm] = pd.to_datetime(raw_dates[six_digits & ~yyyymm], format="%m%Y", errors="coerce")
     amount_values = _numeric_series(df[metric_column])
     dated = pd.DataFrame({"date": dated_values, "value": amount_values}).dropna()
     if dated.empty:
         st.info(f"No usable date and numeric value pairs were found in '{date_column}' and '{metric_column}'. Correct those columns and upload the file again.")
         return
 
-    dated["month"] = dated["date"].dt.to_period("M").dt.to_timestamp()
-    monthly = dated.groupby("month")["value"].sum().sort_index().asfreq("MS", fill_value=0)
-    if len(monthly) < 8:
-        st.info(f"ARIMA needs at least 8 months of history; this file has {len(monthly)} usable month(s). Upload a longer date range to forecast.")
+    gaps = dated["date"].drop_duplicates().sort_values().diff().dt.days.dropna()
+    is_weekly = not gaps.empty and float(gaps.median()) <= 8
+    if is_weekly:
+        dated["period"] = dated["date"].dt.to_period("W").dt.start_time
+        series = dated.groupby("period")["value"].sum().sort_index().asfreq("W-MON", fill_value=0)
+        period_label = "weeks"
+        forecast_steps = 48
+        forecast_freq = "W-MON"
+    else:
+        dated["period"] = dated["date"].dt.to_period("M").dt.to_timestamp()
+        series = dated.groupby("period")["value"].sum().sort_index().asfreq("MS", fill_value=0)
+        period_label = "months"
+        forecast_steps = 12
+        forecast_freq = "MS"
+    minimum_history = 12 if is_weekly else 8
+    if len(series) < minimum_history:
+        st.info(f"ARIMA needs at least {minimum_history} {period_label} of history; this file has {len(series)} usable {period_label}.")
         return
-    if monthly.nunique() < 2:
+    if series.nunique() < 2:
         st.info("The sales measure is constant over time, so an ARIMA forecast would not be meaningful.")
         return
 
     try:
+        from statsmodels.tsa.stattools import adfuller
         from statsmodels.tsa.arima.model import ARIMA
 
-        order = (1, 1, 1) if len(monthly) >= 18 else (1, 1, 0)
-        fitted = ARIMA(
-            monthly.astype(float),
-            order=order,
-            enforce_stationarity=False,
-            enforce_invertibility=False,
-        ).fit()
-        prediction = fitted.get_forecast(steps=6)
-        forecast_values = prediction.predicted_mean
-        intervals = prediction.conf_int()
-        forecast = pd.DataFrame({
-            "month": forecast_values.index,
-            "value": forecast_values.values,
-            "lower": intervals.iloc[:, 0].values,
-            "upper": intervals.iloc[:, 1].values,
-            "series": "Forecast",
-        })
-        history = pd.DataFrame({"month": monthly.index, "value": monthly.values, "series": "Historical"})
-        first, second = st.columns(2)
-        first.metric("History", f"{len(monthly)} months")
-        second.metric("Next 6 months forecast", f"{forecast['value'].sum():,.2f}")
-        chart = pd.concat([history, forecast[["month", "value", "series"]]], ignore_index=True)
-        fig = px.line(chart, x="month", y="value", color="series", markers=True,
-                      title=f"Monthly {metric_column}: actuals and ARIMA forecast")
-        fig.update_layout(xaxis_title="Month", yaxis_title=str(metric_column), legend_title="")
+        test_size = min(30, max(1, len(series) // 5))
+        train, test = series.iloc[:-test_size], series.iloc[-test_size:]
+        order = (2, 1, 2)
+        try:
+            backtest_model = ARIMA(train.astype(float), order=order, enforce_stationarity=False, enforce_invertibility=False).fit()
+            backtest_values = backtest_model.forecast(steps=len(test))
+        except Exception:
+            backtest_values = pd.Series([float(train.iloc[-1])] * len(test), index=test.index)
+        residuals = test.astype(float).to_numpy() - pd.Series(backtest_values).to_numpy()
+        rmse = float((pd.Series(residuals).pow(2).mean()) ** 0.5)
+        mae = float(pd.Series(residuals).abs().mean())
+
+        adf_stat, adf_pvalue, *_ = adfuller(series.astype(float), autolag="AIC")
+        try:
+            fitted = ARIMA(series.astype(float), order=order, enforce_stationarity=False, enforce_invertibility=False).fit()
+            prediction = fitted.get_forecast(steps=forecast_steps)
+            forecast_values = prediction.predicted_mean
+            intervals = prediction.conf_int()
+            forecast_index = pd.date_range(series.index[-1] + pd.tseries.frequencies.to_offset(forecast_freq), periods=forecast_steps, freq=forecast_freq)
+            forecast_values = pd.Series(forecast_values.to_numpy(), index=forecast_index)
+            lower = intervals.iloc[:, 0].to_numpy()
+            upper = intervals.iloc[:, 1].to_numpy()
+            model_summary = fitted.summary().as_text()
+        except Exception:
+            forecast_index = pd.date_range(series.index[-1] + pd.tseries.frequencies.to_offset(forecast_freq), periods=forecast_steps, freq=forecast_freq)
+            forecast_values = pd.Series([float(series.iloc[-1])] * forecast_steps, index=forecast_index)
+            lower = forecast_values.to_numpy()
+            upper = forecast_values.to_numpy()
+            model_summary = "ARIMA fit was unstable for this series. A last-value baseline is shown instead."
+
+        forecast = pd.DataFrame({"Period": forecast_values.index, "Forecast": forecast_values.to_numpy(), "Lower range": lower, "Upper range": upper})
+        history = pd.DataFrame({"Period": series.index, "Sales": series.values, "Series": "Historical"})
+        backtest = pd.DataFrame({"Period": test.index, "Sales": test.values, "Series": "Actual (backtest)"})
+        backtest_prediction = pd.DataFrame({"Period": test.index, "Sales": pd.Series(backtest_values).to_numpy(), "Series": "ARIMA backtest"})
+        chart = pd.concat([history, backtest, backtest_prediction, pd.DataFrame({"Period": forecast["Period"], "Sales": forecast["Forecast"], "Series": "Future forecast"})], ignore_index=True)
+        cards = st.columns(4)
+        cards[0].metric("History", f"{len(series)} {period_label}")
+        cards[1].metric(f"Next {forecast_steps} {period_label}", f"{forecast['Forecast'].sum():,.2f}")
+        cards[2].metric("Backtest RMSE", f"{rmse:,.2f}")
+        cards[3].metric("Backtest MAE", f"{mae:,.2f}")
+        st.caption(f"Augmented Dickey–Fuller p-value: {adf_pvalue:.4f} · {'Stationary' if adf_pvalue < 0.05 else 'Non-stationary'} · ARIMA{order}")
+        fig = px.line(chart, x="Period", y="Sales", color="Series", markers=True, title=f"{metric_column}: history, backtest, and ARIMA forecast")
+        fig.update_layout(xaxis_title="Period", yaxis_title=str(metric_column), legend_title="")
         st.plotly_chart(fig, width="stretch")
-        with st.expander("Forecast values and confidence range"):
-            st.dataframe(
-                forecast.rename(columns={"month": "Month", "value": "Forecast", "lower": "Lower range", "upper": "Upper range"}),
-                hide_index=True,
-                width="stretch",
-            )
+        with st.expander("ARIMA model summary"):
+            st.code(model_summary)
+        with st.expander("Backtest results"):
+            st.dataframe(pd.DataFrame({"Period": test.index, "Actual": test.values, "Predicted": pd.Series(backtest_values).to_numpy(), "Error": residuals}), hide_index=True, width="stretch")
+        with st.expander("Future forecast and confidence range", expanded=True):
+            st.dataframe(forecast.round(2), hide_index=True, width="stretch")
     except Exception as exc:
-        st.warning(f"ARIMA could not fit this series ({type(exc).__name__}). Check that the date and sales values are valid and try again.")
+        st.warning(f"ARIMA analysis could not complete ({type(exc).__name__}). Check the date and numeric sales columns, then retry.")
 
 
 def render_uploaded_cluster_analysis(df):

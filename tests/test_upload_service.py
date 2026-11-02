@@ -432,6 +432,55 @@ class UploadServiceTests(unittest.TestCase):
         self.assertIn("ARIMA sales forecast", headings)
         self.assertIn("Top-selling region / place", cluster_metrics)
 
+    def test_uploaded_sales4_analysis_pages_all_render_on_uploaded_columns(self):
+        class Response:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        dates = pd.date_range("2023-01-01", periods=24, freq="MS")
+        rows = [
+            {
+                "order_date": date.isoformat(),
+                "actual_sales": 120 + index * 5,
+                "credit_note_amount": 4 + index % 3,
+                "quantity": 2 + index % 5,
+                "product": "Tea" if index % 2 else "Coffee",
+                "category": "Drinks" if index % 2 else "Hot drinks",
+                "region": "North" if index % 3 else "South",
+                "branch": "Central" if index % 2 else "Harbor",
+            }
+            for index, date in enumerate(dates)
+        ]
+
+        def fake_get(url, *args, **kwargs):
+            if url.endswith("/api/datasets"):
+                return Response([{"id": 88, "name": "full-sales.csv", "row_count": len(rows), "columns": list(rows[0])}])
+            if url.endswith("/api/datasets/88/rows"):
+                return Response(rows)
+            return Response([])
+
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "frontend" / "sample.py"))
+        app.session_state["user_logged_in"] = True
+        app.session_state["user_id"] = 1
+        app.session_state["user_email"] = "test@example.com"
+        app.session_state["access_token"] = "test-token"
+        app.session_state["active_dataset_id"] = 88
+        with patch("requests.get", side_effect=fake_get):
+            app.run(timeout=30)
+            app.radio[0].set_value("📊 Sales Analytics")
+            app.run(timeout=30)
+            analysis = next(widget for widget in app.radio if widget.key == "uploaded_analysis_88")
+            for choice in analysis.options:
+                analysis = next(widget for widget in app.radio if widget.key == "uploaded_analysis_88")
+                analysis.set_value(choice)
+                app.run(timeout=30)
+                self.assertEqual(len(app.exception), 0, f"{choice} failed: {app.exception}")
+
     def test_floating_chat_keeps_the_ai_response_visible(self):
         class GetResponse:
             status_code = 200
