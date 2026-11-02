@@ -591,7 +591,15 @@ def render_sales4_style_analysis(df, dataset_id):
         "Quarter vs Year", "Business Metrics", "Branch Analysis", "Product Insights",
         "Credit Notes", "Branch Compare", "Category Compare", "Product Clusters", "ARIMA Forecast",
     )
-    selected = st.selectbox("Choose an analysis", menu, key=f"uploaded_analysis_{dataset_id}")
+    st.subheader("Analysis options")
+    st.caption("Choose an option below. Every analysis uses the selected uploaded sales file.")
+    selected = st.radio(
+        "Choose an analysis",
+        menu,
+        key=f"uploaded_analysis_{dataset_id}",
+        horizontal=True,
+        label_visibility="collapsed",
+    )
     sales = _find_column(df, ("sales_amt", "sales_amount", "sales", "revenue", "total_sales", "amount", "order_value"), numeric=True)
     quantity = _find_column(df, ("sales_qty", "quantity", "qty", "units_sold", "units", "volume"), numeric=True)
     date = _find_column(df, ("order_date", "sales_date", "date", "mmyyyy", "month", "period", "transaction_date"))
