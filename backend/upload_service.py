@@ -19,7 +19,8 @@ from sqlalchemy.orm import Session
 from backend.database import engine
 from backend.database_model import UploadedDataset
 
-MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+MAX_UPLOAD_MB = 40
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_ROWS = 50_000
 MAX_COLUMNS = 100
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
@@ -127,7 +128,7 @@ def parse_upload(filename: str, content: bytes) -> pd.DataFrame:
     if not content:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
     if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Upload limit is 15 MB.")
+        raise HTTPException(status_code=413, detail=f"Upload limit is {MAX_UPLOAD_MB} MB.")
     suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     try:
         if suffix == "csv":
@@ -345,14 +346,16 @@ def gemini_rag_answer(
         if image_bytes is not None else ""
     )
     return gemini_generate(
-        "You are SalesMitra's platform support assistant. Give a direct, practical answer about using the app. "
-        "Use the retrieved context for platform instructions and do not invent features. For data or runtime errors, "
-        "state the likely cause, what to fix, and the steps to fix it. If context is insufficient, say what is missing.\n\n"
+        "You are SalesMitra's AI assistant. Answer the user's actual question directly, including general knowledge "
+        "questions. When explaining SalesMitra features, use the retrieved context and never invent app behavior. "
+        "Never invent values or conclusions from a user's sales data; ask them to upload/select data or name the "
+        "missing column if needed. For data or runtime errors, state the likely cause, what to fix, and practical steps. "
+        "If you are uncertain, say so clearly and still provide the most useful safe answer you can.\n\n"
         f"{image_instructions}"
         f"Retrieved context:\n{snippets}\n\nUser question: {query}",
         image_bytes=image_bytes,
         image_mime_type=image_mime_type,
         max_output_tokens=1024,
         thinking_level="low",
-        request_timeout=(8, 45),
+        request_timeout=(10, 90),
     )

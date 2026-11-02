@@ -46,6 +46,7 @@ class UploadServiceTests(unittest.TestCase):
 
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(any("Choose a sales file" in str(widget.label) for widget in app.file_uploader))
+        self.assertTrue(any("up to 40 MB" in widget.value for widget in app.caption))
 
     def test_sales4_product_cluster_uses_selected_uploaded_data(self):
         class Response:
@@ -119,6 +120,11 @@ class UploadServiceTests(unittest.TestCase):
         self.assertTrue(any("Welcome to SalesMitra" in widget.value for widget in app.title))
         self.assertNotIn("🤖 AI Chatbot", app.radio[0].options)
         self.assertTrue(any("How may I help you?" in item.value for item in app.markdown))
+        self.assertTrue(any("up to 40 MB" in item.value for item in app.caption))
+
+    def test_upload_size_limit_is_above_10_mb(self):
+        self.assertEqual(upload_service.MAX_UPLOAD_BYTES, 40 * 1024 * 1024)
+        self.assertGreater(upload_service.MAX_UPLOAD_BYTES, 10 * 1024 * 1024)
 
     def test_parse_csv_and_excel(self):
         csv_frame = upload_service.parse_upload("sales.csv", b"Product,Sales\nTea,12.5\nCoffee,8\n")
@@ -182,6 +188,35 @@ class UploadServiceTests(unittest.TestCase):
 
         self.assertEqual(result["answer"], "Gemini grounded help")
         self.assertIn("Load CSV data", result["sources"])
+
+    def test_chat_endpoint_answers_general_questions_without_database(self):
+        with patch("chatbot.rag_chatbot.gemini_rag_answer", return_value="A clear answer from Gemini."), \
+             patch("backend.main.get_db", side_effect=AssertionError("general help must not require the database")):
+            response = TestClient(api.app).post(
+                "/api/chatbot/query",
+                json={"query": "What does the platform help me do?"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["answer"], "A clear answer from Gemini.")
+
+    def test_chatbot_returns_useful_guidance_when_gemini_fails(self):
+        from fastapi import HTTPException
+
+        with patch(
+            "chatbot.rag_chatbot.gemini_rag_answer",
+            side_effect=HTTPException(status_code=504, detail="Gemini timed out"),
+        ):
+            result = SalesMitraChatbot(None, None).answer("Where do I upload sales data?")
+
+        self.assertTrue(result["answer"].strip())
+        self.assertIn("related SalesMitra guidance", result["answer"])
+        self.assertIn("Upload sales data", result["answer"])
+
+    def test_general_sales_questions_are_not_mistaken_for_database_queries(self):
+        bot = SalesMitraChatbot(None, None)
+        self.assertFalse(bot._asks_top_sales("What are the best strategies to improve sales?"))
+        self.assertFalse(bot._asks_profit_projection("What is profit margin?"))
 
     def test_image_help_passes_image_to_gemini_rag(self):
         with patch("chatbot.rag_chatbot.gemini_rag_answer", return_value="I can see the upload error.") as rag:
@@ -282,6 +317,64 @@ class UploadServiceTests(unittest.TestCase):
         self.assertIn("exact duplicate row(s)", messages)
         self.assertIn("not numeric", messages)
         self.assertTrue(any(widget.label == "Open a saved analysis" for widget in app.selectbox))
+
+    def test_latest_upload_stays_active_and_previous_analysis_reopens_its_own_data(self):
+        class Response:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        datasets = [
+            {"id": 9, "name": "latest.csv", "row_count": 1, "columns": ["product", "sales_amount"]},
+            {"id": 8, "name": "previous.csv", "row_count": 1, "columns": ["product", "sales_amount"]},
+        ]
+        rows_by_id = {
+            9: [{"product": "Current product", "sales_amount": 900}],
+            8: [{"product": "Previous product", "sales_amount": 100}],
+        }
+
+        def fake_get(url, *args, **kwargs):
+            if url.endswith("/api/datasets"):
+                return Response(datasets)
+            if url.endswith("/api/datasets/9/rows"):
+                return Response(rows_by_id[9])
+            if url.endswith("/api/datasets/8/rows"):
+                return Response(rows_by_id[8])
+            if url.endswith("/api/sales/summary"):
+                return Response({"total_records": 0})
+            if url.endswith("/api/sales"):
+                return Response([])
+            return Response({"status": "ok"})
+
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "frontend" / "sample.py"))
+        app.session_state["user_logged_in"] = True
+        app.session_state["user_id"] = 1
+        app.session_state["user_email"] = "test@example.com"
+        app.session_state["access_token"] = "test-token"
+        # Simulate upload success with a stale selector value from an older file.
+        app.session_state["active_dataset_id"] = 9
+        app.session_state["active_dataset_selector"] = 8
+        with patch("requests.get", side_effect=fake_get):
+            app.run(timeout=30)
+            self.assertEqual(app.session_state["active_dataset_id"], 9)
+            self.assertTrue(any("latest.csv · 1 records" in item.value for item in app.caption))
+
+            picker = next(widget for widget in app.selectbox if widget.key == "active_dataset_selector")
+            picker.set_value(8)
+            app.run(timeout=30)
+            self.assertEqual(app.session_state["active_dataset_id"], 8)
+            self.assertTrue(any("previous.csv · 1 records" in item.value for item in app.caption))
+
+            app.radio[0].set_value("📊 Sales Analytics")
+            app.run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.session_state["active_dataset_id"], 8)
+        self.assertTrue(any("previous.csv · 1 records" in item.value for item in app.caption))
 
     def test_uploaded_sales_analytics_offers_views_and_product_location_drilldown(self):
         class Response:

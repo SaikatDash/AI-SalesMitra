@@ -341,9 +341,10 @@ def ask_chatbot(question, image=None):
     except (ValueError, TypeError) as exc:
         return {"answer": f"The AI service returned an unreadable response ({type(exc).__name__}). Please retry."}
 
-def load_sales():
+def load_sales(dataset_id=None):
     try:
-        dataset_id = st.session_state.get("active_dataset_id")
+        if dataset_id is None:
+            dataset_id = st.session_state.get("active_dataset_id")
         if dataset_id:
             response = requests.get(
                 f"{API_BASE_URL}/api/datasets/{dataset_id}/rows",
@@ -358,6 +359,38 @@ def load_sales():
     except Exception:
         pass
     return pd.DataFrame()
+
+
+def _sync_active_dataset_selector():
+    """Keep the selected saved analysis in sync when users change the picker."""
+    st.session_state.active_dataset_id = st.session_state.get("active_dataset_selector")
+
+
+def render_saved_dataset_selector(datasets, *, label):
+    """Select a saved upload and keep the dashboard and analytics views aligned."""
+    if not datasets:
+        return None
+    by_id = {item["id"]: item for item in datasets}
+    dataset_ids = list(by_id)
+    active_id = st.session_state.get("active_dataset_id")
+    if active_id not in by_id:
+        active_id = dataset_ids[0]
+        st.session_state.active_dataset_id = active_id
+    if st.session_state.get("active_dataset_selector") != active_id:
+        st.session_state.active_dataset_selector = active_id
+
+    selected_id = st.selectbox(
+        label,
+        options=dataset_ids,
+        format_func=lambda dataset_id: (
+            f"{by_id[dataset_id].get('name', 'Uploaded dataset')} "
+            f"({by_id[dataset_id].get('row_count', 0):,} rows)"
+        ),
+        key="active_dataset_selector",
+        on_change=_sync_active_dataset_selector,
+    )
+    st.session_state.active_dataset_id = selected_id
+    return by_id[selected_id]
 
 
 def dataset_headers():
@@ -393,7 +426,9 @@ def load_datasets():
 
 def render_uploaded_dataset(dataset, *, include_advanced=False):
     """Show useful analytics for arbitrary uploaded table columns."""
-    df = load_sales()
+    # Bind the query to the chosen saved analysis directly. This prevents a
+    # stale selector/session value from silently loading another upload.
+    df = load_sales(dataset.get("id"))
     if df.empty:
         st.warning("This dataset has no rows to analyze.")
         return
@@ -780,7 +815,7 @@ def render_uploaded_cluster_analysis(df):
 
 def render_dataset_upload(container=None, key_prefix="sidebar"):
     target = container if container is not None else st.sidebar
-    target.caption("CSV, Excel, or PDF · up to 15 MB")
+    target.caption("CSV, Excel, or PDF · up to 40 MB")
     with target.form(f"{key_prefix}_sales_dataset_upload", clear_on_submit=True):
         uploaded = st.file_uploader(
             "Choose a sales file",
@@ -809,6 +844,9 @@ def render_dataset_upload(container=None, key_prefix="sidebar"):
                         target.error("The backend returned an incomplete upload result. Please try again.")
                         return
                     st.session_state.active_dataset_id = result["id"]
+                    # The saved-analysis widget may still hold an older choice.
+                    # Set both values before rerunning so a new upload stays active.
+                    st.session_state.active_dataset_selector = result["id"]
                     st.session_state.last_upload_result = result
                     st.rerun()
                 else:
@@ -931,9 +969,6 @@ def render_dashboard():
 
     datasets = load_datasets()
     if datasets:
-        by_id = {item["id"]: item for item in datasets}
-        if st.session_state.get("active_dataset_id") not in by_id:
-            st.session_state.active_dataset_id = datasets[0]["id"]
         st.subheader("Your previous analyses")
         st.caption("Your uploads are saved to your account. Choose one to reopen its charts, summary, and data checks.")
         history = pd.DataFrame([
@@ -946,18 +981,8 @@ def render_dashboard():
             for item in datasets[:10]
         ])
         st.dataframe(history, hide_index=True, width="stretch")
-        selected_id = st.selectbox(
-            "Open a saved analysis",
-            options=list(by_id),
-            format_func=lambda dataset_id: (
-                f"{by_id[dataset_id].get('name', 'Uploaded dataset')} "
-                f"({by_id[dataset_id].get('row_count', 0):,} rows)"
-            ),
-            index=list(by_id).index(st.session_state.active_dataset_id),
-            key="active_dataset_selector",
-        )
-        st.session_state.active_dataset_id = selected_id
-        render_uploaded_dataset(by_id[selected_id])
+        selected_dataset = render_saved_dataset_selector(datasets, label="Open a saved analysis")
+        render_uploaded_dataset(selected_dataset)
         return
 
     st.info("Start by uploading a CSV, Excel, or PDF sales file in the sidebar. Your analysis will appear here and be saved to your account for next time.")
@@ -1013,8 +1038,8 @@ def render_analytics():
     st.title("📈 Sales Analytics")
     st.caption("Advanced AI Powered Analytics")
     uploaded_sets = load_datasets()
-    active = next((item for item in uploaded_sets if item["id"] == st.session_state.get("active_dataset_id")), None)
-    if active:
+    active = render_saved_dataset_selector(uploaded_sets, label="Sales dataset for this analysis")
+    if active is not None:
         render_uploaded_dataset(active, include_advanced=True)
         return
     df = load_sales()

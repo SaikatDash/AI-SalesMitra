@@ -114,6 +114,7 @@ active_dataset_id = st.session_state.get("active_dataset_id")
 session_token = st.session_state.get("access_token")
 if st.session_state.get("user_logged_in") and session_token:
     with st.sidebar.expander("📤 Upload sales data", expanded=active_dataset_id is None):
+        st.sidebar.caption("CSV, Excel, or PDF · up to 40 MB")
         with st.sidebar.form("sales4_dataset_upload", clear_on_submit=True):
             uploaded_sales_file = st.file_uploader(
                 "Choose a sales file", type=["csv", "xls", "xlsx", "xlsm", "pdf"], key="sales4_upload_file"
@@ -129,7 +130,7 @@ if st.session_state.get("user_logged_in") and session_token:
                         headers={"Authorization": f"Bearer {session_token}"},
                         files={"file": (uploaded_sales_file.name, uploaded_sales_file.getvalue(),
                                          uploaded_sales_file.type or "application/octet-stream")},
-                        timeout=(10, 180),
+                        timeout=(10, 240),
                     )
                     if upload_response.status_code == 200:
                         try:

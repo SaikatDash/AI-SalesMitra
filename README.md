@@ -316,7 +316,7 @@ HOST=0.0.0.0
 PORT=8000
 ```
 
-The signed-in dashboard at `frontend/sample.py` accepts CSV, XLS, XLSX/XLSM, and PDF uploads up to 15 MB from the sidebar. CSV and Excel columns are used to create one SQL table per unique user upload; exact repeat uploads reuse the existing dataset table. PDF table extraction and generated dataset insights use Gemini. Set `GEMINI_API_KEY` (or the existing `GOOGLE_API_KEY`) in the backend environment (not the Streamlit frontend) to enable Gemini analysis and platform-help answers. Excel parsing requires the backend requirements to be installed.
+The signed-in dashboard at `frontend/sample.py` accepts CSV, XLS, XLSX/XLSM, and PDF uploads up to 40 MB from the sidebar. CSV and Excel columns are used to create one SQL table per unique user upload; exact repeat uploads reuse the existing dataset table. PDF table extraction and generated dataset insights use Gemini. Set `GEMINI_API_KEY` (or the existing `GOOGLE_API_KEY`) in the backend environment (not the Streamlit frontend) to enable Gemini analysis and platform-help answers. Excel parsing requires the backend requirements to be installed.
 
 If Google reports that a Gemini key has been leaked, revoke it and generate a replacement. Use the replacement in the local `.env`; for Render, set it in the backend service's environment settings and redeploy the backend. Do not commit or bake `.env` into a container image.
 ---

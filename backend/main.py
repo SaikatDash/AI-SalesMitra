@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import os
 import time
+import logging
 
 # Make package imports work both from the project root (`backend.main`) and
 # when running inside `backend` (`main:app`). This must happen before any
@@ -36,10 +37,11 @@ from backend.model import (
 )
 
 from chatbot.rag_chatbot import SalesMitraChatbot, product_location_cluster_analysis
-from backend.upload_service import MAX_UPLOAD_BYTES, _json_value, dataset_frame, dataset_summary, gemini_dataset_insight, parse_upload, save_dataset
+from backend.upload_service import MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, _json_value, dataset_frame, dataset_summary, gemini_dataset_insight, parse_upload, save_dataset
 
 app = FastAPI(title="AISalesMitra:You Personal Sales Assistant API", version="1.0.0")
 app.state.database_startup_error = None
+logger = logging.getLogger(__name__)
 
 # Add CORS middleware to allow requests from Streamlit
 app.add_middleware(
@@ -220,7 +222,7 @@ async def upload_dataset(
 ):
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Upload limit is 15 MB.")
+        raise HTTPException(status_code=413, detail=f"Upload limit is {MAX_UPLOAD_MB} MB.")
     digest = hashlib.sha256(content).hexdigest()
     dataset = db.query(UploadedDataset).filter_by(user_id=user.id, content_hash=digest).first()
     if dataset:
@@ -357,7 +359,7 @@ def get_product_location_clusters(
 
 
 @app.post("/api/chatbot/query")
-def ask_chatbot(payload: ChatbotQuery, db: Session = Depends(get_db)):
+def ask_chatbot(payload: ChatbotQuery):
     """Ask the RAG assistant for platform help, optionally with an image."""
     image_bytes = None
     image_mime_type = payload.image_mime_type or "image/png"
@@ -372,8 +374,41 @@ def ask_chatbot(payload: ChatbotQuery, db: Session = Depends(get_db)):
             raise HTTPException(status_code=413, detail="Images must be 5 MB or smaller. Resize the image and retry.")
     elif payload.image_mime_type:
         raise HTTPException(status_code=400, detail="Image type was sent without image data. Attach the image again.")
-    bot = SalesMitraChatbot(db, SalesData)
-    return bot.answer(payload.query, image_bytes=image_bytes, image_mime_type=image_mime_type)
+    bot = SalesMitraChatbot(None, SalesData)
+    normalized = payload.query.lower().strip()
+    needs_sales_data = (
+        image_bytes is None
+        and (
+            bot._asks_top_sales(normalized)
+            or bot._asks_profit_projection(normalized)
+        )
+    )
+    database_generator = None
+    if needs_sales_data:
+        database_generator = get_db()
+        try:
+            bot.db = next(database_generator)
+        except HTTPException:
+            # Platform and general questions must remain answerable even while
+            # the sales database is unavailable. Data-specific intents return
+            # a clear database message from the assistant.
+            bot.db = None
+    try:
+        return bot.answer(payload.query, image_bytes=image_bytes, image_mime_type=image_mime_type)
+    except Exception:
+        logger.exception("Chatbot request failed")
+        return {
+            "answer": (
+                "I couldn't finish that answer because the assistant hit a temporary error. "
+                "Please retry, or ask a shorter question."
+            ),
+            "intent": "assistant_error",
+            "sources": [],
+            "navigation": [],
+        }
+    finally:
+        if database_generator is not None:
+            database_generator.close()
 
 
 if __name__ == "__main__":

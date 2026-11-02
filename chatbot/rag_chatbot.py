@@ -245,7 +245,7 @@ class SalesMitraChatbot:
                 "route": "Upload help",
                 "content": (
                     "For a failed upload, check that the file is CSV, XLS, XLSX, XLSM, or a text-based PDF, "
-                    "is under 15 MB, and contains a header row plus at least one data row. In Excel, remove "
+                    "is under 40 MB, and contains a header row plus at least one data row. In Excel, remove "
                     "empty sheets or merged title rows above the table. Keep each column name unique. Put plain "
                     "numeric values in sales, quantity, price, profit, and cost columns. Correct dates to a "
                     "consistent format. Review blank cells and duplicate rows before trusting totals. The data "
@@ -305,9 +305,13 @@ class SalesMitraChatbot:
             return self._navigation_answer(normalized)
 
         if self._asks_top_sales(normalized):
+            if self.db is None:
+                return self._sales_data_unavailable_answer()
             return self._top_sales_answer()
 
         if self._asks_profit_projection(normalized):
+            if self.db is None:
+                return self._sales_data_unavailable_answer()
             return self._profit_projection_answer()
 
         docs = self._retrieve(normalized)
@@ -328,7 +332,7 @@ class SalesMitraChatbot:
                 scored.append((score, doc))
         scored.sort(key=lambda item: item[0], reverse=True)
         if not scored:
-            return self.knowledge_base[:limit]
+            return []
         return [doc for _, doc in scored[:limit]]
 
     def _compose_rag_answer(
@@ -341,19 +345,46 @@ class SalesMitraChatbot:
     ) -> str:
         if gemini_rag_answer:
             try:
-                return gemini_rag_answer(
+                answer = gemini_rag_answer(
                     query,
                     docs,
                     image_bytes=image_bytes,
                     image_mime_type=image_mime_type,
                 )
+                if isinstance(answer, str) and answer.strip():
+                    return answer.strip()
+                raise ValueError("Gemini returned an empty answer")
             except Exception as exc:
                 provider_detail = getattr(exc, "detail", None)
-                unavailable = str(provider_detail) if provider_detail else "Gemini AI is unavailable right now."
-                points = [f"- {doc['title']}: {doc['content']}" for doc in docs[:3]]
-                return unavailable + "\n\nHere is the matching platform guidance:\n" + "\n".join(points)
-        points = [f"- {doc['title']}: {doc['content']}" for doc in docs[:3]]
-        return "Gemini AI is unavailable right now. Here is the matching platform guidance:\n" + "\n".join(points)
+                points = [f"- **{doc['title']}:** {doc['content']}" for doc in docs[:3]]
+                if points:
+                    detail = str(provider_detail) if provider_detail else "Gemini is temporarily unavailable."
+                    return detail + "\n\nHere is the related SalesMitra guidance:\n" + "\n".join(points)
+                return (
+                    "I couldn't reach Gemini to answer that accurately just now. Please retry in a moment. "
+                    "I can help with SalesMitra uploads, dashboards, forecasts, product and branch analysis, "
+                    "data errors, or questions about your uploaded sales data."
+                )
+        points = [f"- **{doc['title']}:** {doc['content']}" for doc in docs[:3]]
+        if points:
+            return "Gemini is not configured right now. Here is the related SalesMitra guidance:\n" + "\n".join(points)
+        return (
+            "Gemini is not configured right now, so I can't answer that accurately. Set GEMINI_API_KEY "
+            "on the backend and retry. I can help with SalesMitra uploads, dashboards, forecasts, "
+            "product and branch analysis, and data errors."
+        )
+
+    @staticmethod
+    def _sales_data_unavailable_answer() -> Dict[str, Any]:
+        return {
+            "answer": (
+                "I can answer general questions, but I couldn't connect to the sales database to calculate "
+                "that result. Check the backend DATABASE_URL and database availability, then retry."
+            ),
+            "intent": "sales_data_unavailable",
+            "sources": [],
+            "navigation": [],
+        }
 
     def _navigation_answer(self, query: str) -> Dict[str, Any]:
         docs = self._retrieve(query)
@@ -405,7 +436,7 @@ class SalesMitraChatbot:
         ]
         docs = [doc for doc in self.knowledge_base if doc["title"] == "Suggested chatbot questions"]
         answer = self._compose_rag_answer("What can you help me with?", docs)
-        if answer.startswith("Gemini AI is unavailable right now."):
+        if answer.startswith(("Gemini is not configured", "I couldn't reach Gemini")):
             answer = "You can ask me questions like:\n" + "\n".join(f"- {question}" for question in questions)
         return {
             "answer": answer,
@@ -528,11 +559,30 @@ class SalesMitraChatbot:
 
     @staticmethod
     def _asks_top_sales(query: str) -> bool:
-        return any(word in query for word in ["highest", "top", "best"]) and "sales" in query
+        if any(phrase in query for phrase in ("strategy", "strategies", "best way", "how to improve", "how to increase", "tips to", "grow sales")):
+            return False
+        has_sales_word = "sales" in query
+        explicit_ranking = any(
+            phrase in query
+            for phrase in ("highest sales", "top sales", "top-selling", "top selling", "best-selling", "best selling")
+        )
+        asks_for_entity = any(
+            word in query
+            for word in ("product", "brand", "branch", "region", "location", "place", "which", "where", "my sales", "our sales")
+        )
+        return has_sales_word and (explicit_ranking or (asks_for_entity and any(word in query for word in ("highest", "top", "best"))))
 
     @staticmethod
     def _asks_profit_projection(query: str) -> bool:
-        return any(word in query for word in ["profit", "forecast", "predict", "projection", "next year"])
+        if any(phrase in query for phrase in ("what is", "what does", "define", "meaning of", "explain")) and not any(
+            phrase in query for phrase in ("my data", "my sales", "uploaded data", "using the data", "from my data")
+        ):
+            return False
+        asks_for_projection = any(
+            word in query for word in ("forecast", "predict", "projection", "projected", "next year", "estimate")
+        )
+        asks_for_sales_metric = any(word in query for word in ("sales", "profit", "revenue", "data"))
+        return asks_for_projection and asks_for_sales_metric
 
 
 def product_location_cluster_analysis(db: Session, sales_model, profit_margin_pct: float = 20.0) -> Dict[str, Any]:
